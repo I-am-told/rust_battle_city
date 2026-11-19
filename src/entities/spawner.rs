@@ -7,11 +7,8 @@ pub struct EnemySpawner {
     timer: f32,
     next_point: usize,
     pub remaining_to_spawn: u32,
-    /// Максимум врагов ОДНОВРЕМЕННО на поле.
-    /// ЗАДЕЛ НА БУДУЩЕЕ: зависит от уровня игры.
     pub max_on_field: u32,
     next_id: u32,
-    /// Сколько врагов уже заспавнено (для определения бонусных — каждый 4-й).
     spawned_count: u32,
     spawn_points: Vec<IVec2>,
 }
@@ -42,6 +39,12 @@ impl EnemySpawner {
             ivec2(center_x, y),
             ivec2(right_x, y),
         ]
+    }
+
+    /// Публичный доступ к точкам спавна — чтобы другие системы
+    /// (например, генератор бонусов) могли их исключать.
+    pub fn spawn_points(&self) -> &[IVec2] {
+        &self.spawn_points
     }
 
     pub fn update(
@@ -80,8 +83,6 @@ impl EnemySpawner {
         let id = self.next_id;
         self.next_id += 1;
 
-        // Каждый 4-й заспавненный танк — бонусный (1-й обычный, 2-й, 3-й, 4-й бонусный, ...).
-        // spawned_count считает уже заспавненных, поэтому проверяем (spawned_count + 1) % 4 == 0.
         self.spawned_count += 1;
         let is_bonus = self.spawned_count % 4 == 0;
 

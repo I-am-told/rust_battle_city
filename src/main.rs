@@ -10,6 +10,7 @@ use map::GameMap;
 use entities::tank::{Tank, Direction};
 use entities::bullet::Bullet;
 use entities::spawner::EnemySpawner;
+use entities::bonus::Bonus;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum GameState {
@@ -17,6 +18,8 @@ enum GameState {
     Victory,
     Defeat,
 }
+
+const BONUS_LIFETIME: f32 = 15.0;
 
 #[macroquad::main("Battle City (Rust)")]
 async fn main() {
@@ -29,23 +32,19 @@ async fn main() {
     let keys_p1: KeyBindings = (&cfg.player1_keys).into();
     let mut map = GameMap::new(cfg.grid_width, cfg.grid_height);
 
-    // Спавн игрока 1: слева от базы, с зазором 1 тайл от кирпичей
-    // (base.x - 1) и 1 тайл от нижней границы поля.
-    // Танк занимает 2 тайла по X: x .. x+1. Кирпич на base.x - 1.
-    // Чтобы был зазор в 1 тайл: x + 1 = base.x - 2 → x = base.x - 3.
-    // НО нам нужен ЗАЗОР: x + 1 < base.x - 1 → x < base.x - 2 → x = base.x - 3.
-    // Проверим: base.x = 5 → x = 2, танк 2,3. Кирпич 4. Зазор — тайл 3? Нет!
-    // Танк занимает тайлы 2 и 3. Кирпич на 4. Между 3 и 4 — нет зазора.
-    // Нужно x = base.x - 4 → танк 1,2. Кирпич 4. Зазор — тайл 3. ✅
-    let player_spawn = {
+    let player_spawn_tile = {
         if let Some(base) = map.base_origin {
-            let sx = ((base.x - 4).max(0)) as f32 * cfg.tile_size;
-            let sy = ((base.y - 1).max(0)) as f32 * cfg.tile_size;
-            vec2(sx, sy)
+            let x = (base.x - 4).max(0);
+            let y = (base.y - 1).max(0);
+            ivec2(x, y)
         } else {
-            vec2(1.0 * cfg.tile_size, (cfg.grid_height - 3) as f32 * cfg.tile_size)
+            ivec2(1, cfg.grid_height - 3)
         }
     };
+    let player_spawn = vec2(
+        player_spawn_tile.x as f32 * cfg.tile_size,
+        player_spawn_tile.y as f32 * cfg.tile_size,
+    );
 
     let mut player = Tank::new(
         player_spawn,
@@ -63,6 +62,7 @@ async fn main() {
     let mut spawner = EnemySpawner::new(10, 3, cfg.grid_width);
 
     let mut bullets: Vec<Bullet> = Vec::new();
+    let mut bonuses: Vec<Bonus> = Vec::new();
 
     let mut state = GameState::Playing;
 
@@ -168,6 +168,7 @@ async fn main() {
 
             bullets.retain(|b| b.alive);
 
+            let mut pending_bonuses: u32 = 0;
             for id in hit_ids {
                 if id == player.id {
                     if !player.invulnerable {
@@ -180,11 +181,38 @@ async fn main() {
                         }
                     }
                 } else if let Some(e) = enemies.iter_mut().find(|e| e.id == id) {
+                    if e.is_bonus {
+                        pending_bonuses += 1;
+                    }
                     e.take_hit();
                 }
             }
 
+            // Спавним бонусы в случайных свободных местах.
+            if pending_bonuses > 0 {
+                // Запрещённые тайлы: точки спавна врагов + тайл игрока.
+                let mut forbidden: Vec<IVec2> = spawner.spawn_points().to_vec();
+                forbidden.push(player_spawn_tile);
+
+                for _ in 0..pending_bonuses {
+                    if let Some(tile) = map.random_bonus_spawn(&forbidden) {
+                        let pos = vec2(
+                            tile.x as f32 * cfg.tile_size,
+                            tile.y as f32 * cfg.tile_size,
+                        );
+                        bonuses.push(Bonus::new(pos, cfg.tile_size, BONUS_LIFETIME));
+                        // Добавим в forbidden, чтобы два бонуса не легли в одну клетку.
+                        forbidden.push(tile);
+                    }
+                }
+            }
+
             enemies.retain(|e| e.alive);
+
+            for b in bonuses.iter_mut() {
+                b.update(dt);
+            }
+            bonuses.retain(|b| b.alive);
 
             if map.base_destroyed {
                 state = GameState::Defeat;
@@ -203,6 +231,7 @@ async fn main() {
         set_camera(&cam);
 
         map.draw(cfg.tile_size);
+        for b in bonuses.iter() { b.draw(); }
         for b in bullets.iter() { b.draw(); }
         for enemy in enemies.iter() { enemy.draw(); }
         player.draw();
