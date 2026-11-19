@@ -89,6 +89,7 @@ impl Bullet {
         for t in tanks {
             if !t.alive { continue; }
             if t.team == self.owner_team { continue; }
+            if t.invulnerable { continue; }
             if pos.x < t.pos.x + t.size
                 && pos.x + self.size > t.pos.x
                 && pos.y < t.pos.y + t.size
@@ -134,8 +135,6 @@ impl Bullet {
         }
     }
 
-    /// Взаимное уничтожение пуль: если две пули РАЗНЫХ команд пересекаются —
-    /// обе умирают. Вызывать после обновления всех пуль.
     pub fn resolve_mutual_destruction(bullets: &mut [Bullet]) {
         let n = bullets.len();
         for i in 0..n {

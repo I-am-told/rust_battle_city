@@ -52,6 +52,8 @@ pub struct Tank {
     pub pierces_steel: bool,
     pub team: Team,
     pub alive: bool,
+    /// Неуязвимость (после респавна). Пока true — пули не бьют.
+    pub invulnerable: bool,
     // --- ИИ ---
     pub ai_dir_timer: f32,
     pub ai_shoot_timer: f32,
@@ -69,6 +71,7 @@ impl Tank {
             pierces_steel: false,
             team: Team::Player,
             alive: true,
+            invulnerable: false,
             ai_dir_timer: 0.0,
             ai_shoot_timer: 0.0,
         }
@@ -89,10 +92,9 @@ impl Tank {
         t
     }
 
-    /// Применить попадание. Пока просто убивает танк.
-    /// Позже — уменьшение HP, respawn игрока и т.п.
     pub fn take_hit(&mut self) {
         if !self.alive { return; }
+        if self.invulnerable { return; }
         self.alive = false;
     }
 
@@ -184,6 +186,7 @@ impl Tank {
         tile_size: f32,
     ) {
         if !self.alive { return; }
+
         let mut desired: Option<Direction> = None;
         if is_key_down(keys.up)    { desired = Some(Direction::Up); }
         if is_key_down(keys.down)  { desired = Some(Direction::Down); }
@@ -388,6 +391,15 @@ impl Tank {
 
     pub fn draw(&self) {
         if !self.alive { return; }
+
+        // Мигание при неуязвимости.
+        if self.invulnerable {
+            let phase = ((get_time() * 10.0) as i32) % 2;
+            if phase != 0 {
+                return;
+            }
+        }
+
         let color = match self.team {
             Team::Player => GREEN,
             Team::Enemy  => RED,

@@ -29,29 +29,30 @@ async fn main() {
     let keys_p1: KeyBindings = (&cfg.player1_keys).into();
     let mut map = GameMap::new(cfg.grid_width, cfg.grid_height);
 
-    // Игрок спавнится НАД БАЗОЙ (по центру), с отступом в 1 тайл от кирпичной
-    // защиты сверху. Вычисляется от позиции базы, а не хардкодится.
-    let (start_x, start_y) = {
+    // Позиция спавна игрока 1: слева от базы, с зазором 1 тайл от кирпичей
+    // и 1 тайл от нижней границы поля. Вычисляется от base_origin.
+    // (Игрок 2 будет справа — x = base.x + 3 — когда появится.)
+    let player_spawn = {
         if let Some(base) = map.base_origin {
-            // Танк высотой 2 тайла. Над базой — кирпичи (base.y - 1).
-            // Танк должен занимать base.y - 3 .. base.y - 1, то есть
-            // его верхний тайл = base.y - 3.
-            let sx = base.x as f32 * cfg.tile_size;
-            let sy = (base.y - 3) as f32 * cfg.tile_size;
-            (sx, sy)
+            let sx = ((base.x - 3).max(0)) as f32 * cfg.tile_size;
+            let sy = ((base.y - 1).max(0)) as f32 * cfg.tile_size;
+            vec2(sx, sy)
         } else {
-            // На случай отсутствия базы — старое поведение.
-            (5.0 * cfg.tile_size, (cfg.grid_height - 3) as f32 * cfg.tile_size)
+            vec2(2.0 * cfg.tile_size, (cfg.grid_height - 3) as f32 * cfg.tile_size)
         }
     };
 
     let mut player = Tank::new(
-        vec2(start_x, start_y),
+        player_spawn,
         Direction::Up,
         tank_size,
         cfg.tank_speed,
     );
     player.id = 0;
+
+    let mut player_lives: u32 = 3;
+    let mut respawn_timer: f32 = 0.0;
+    let mut invuln_timer: f32 = 0.0;
 
     let mut enemies: Vec<Tank> = Vec::new();
     let mut spawner = EnemySpawner::new(10, 3, cfg.grid_width);
@@ -67,6 +68,28 @@ async fn main() {
         if is_key_pressed(KeyCode::Escape) { break; }
 
         if state == GameState::Playing {
+            // --- Таймер неуязвимости ---
+            if invuln_timer > 0.0 {
+                invuln_timer -= dt;
+                if invuln_timer <= 0.0 {
+                    player.invulnerable = false;
+                }
+            }
+
+            // --- Таймер респавна ---
+            if !player.alive {
+                if respawn_timer > 0.0 {
+                    respawn_timer -= dt;
+                    if respawn_timer <= 0.0 {
+                        player.pos = player_spawn;
+                        player.direction = Direction::Up;
+                        player.alive = true;
+                        player.invulnerable = true;
+                        invuln_timer = 3.0;
+                    }
+                }
+            }
+
             let snapshot: Vec<Tank> = std::iter::once(player.clone())
                 .chain(enemies.iter().cloned())
                 .collect();
@@ -144,7 +167,15 @@ async fn main() {
 
             for id in hit_ids {
                 if id == player.id {
-                    player.take_hit();
+                    if !player.invulnerable {
+                        player.take_hit();
+                        player_lives = player_lives.saturating_sub(1);
+                        if player_lives == 0 {
+                            state = GameState::Defeat;
+                        } else {
+                            respawn_timer = 1.0;
+                        }
+                    }
                 } else if let Some(e) = enemies.iter_mut().find(|e| e.id == id) {
                     e.take_hit();
                 }
@@ -203,6 +234,26 @@ async fn main() {
         }
 
         set_default_camera();
+
+        // HUD: жизни и количество оставшихся врагов — в экранных координатах.
+        draw_text(
+            &format!("LIVES: {}", player_lives),
+            10.0,
+            24.0,
+            24.0,
+            WHITE,
+        );
+        draw_text(
+            &format!(
+                "ENEMIES: {} + {} in reserve",
+                enemies.iter().filter(|e| e.alive).count(),
+                spawner.remaining_to_spawn
+            ),
+            10.0,
+            48.0,
+            20.0,
+            LIGHTGRAY,
+        );
 
         next_frame().await;
     }
