@@ -11,6 +11,13 @@ use entities::tank::{Tank, Direction};
 use entities::bullet::Bullet;
 use entities::spawner::EnemySpawner;
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum GameState {
+    Playing,
+    Victory,
+    Defeat,
+}
+
 #[macroquad::main("Battle City (Rust)")]
 async fn main() {
     let cfg = load_config();
@@ -22,8 +29,21 @@ async fn main() {
     let keys_p1: KeyBindings = (&cfg.player1_keys).into();
     let mut map = GameMap::new(cfg.grid_width, cfg.grid_height);
 
-    let start_x = 5.0 * cfg.tile_size;
-    let start_y = 10.0 * cfg.tile_size;
+    // Игрок спавнится НАД БАЗОЙ (по центру), с отступом в 1 тайл от кирпичной
+    // защиты сверху. Вычисляется от позиции базы, а не хардкодится.
+    let (start_x, start_y) = {
+        if let Some(base) = map.base_origin {
+            // Танк высотой 2 тайла. Над базой — кирпичи (base.y - 1).
+            // Танк должен занимать base.y - 3 .. base.y - 1, то есть
+            // его верхний тайл = base.y - 3.
+            let sx = base.x as f32 * cfg.tile_size;
+            let sy = (base.y - 3) as f32 * cfg.tile_size;
+            (sx, sy)
+        } else {
+            // На случай отсутствия базы — старое поведение.
+            (5.0 * cfg.tile_size, (cfg.grid_height - 3) as f32 * cfg.tile_size)
+        }
+    };
 
     let mut player = Tank::new(
         vec2(start_x, start_y),
@@ -34,11 +54,11 @@ async fn main() {
     player.id = 0;
 
     let mut enemies: Vec<Tank> = Vec::new();
-    // 10 врагов всего за уровень, 3 одновременно. Позже max_on_field будет
-    // зависеть от уровня игры (см. комментарий в EnemySpawner).
     let mut spawner = EnemySpawner::new(10, 3, cfg.grid_width);
 
     let mut bullets: Vec<Bullet> = Vec::new();
+
+    let mut state = GameState::Playing;
 
     request_new_screen_size(playfield_w, playfield_h);
 
@@ -46,100 +66,98 @@ async fn main() {
         let dt = get_frame_time();
         if is_key_pressed(KeyCode::Escape) { break; }
 
-        // ============================================================
-        // 1) Снимок танков на начало кадра — для коллизий танк-танк.
-        // ============================================================
-        let snapshot: Vec<Tank> = std::iter::once(player.clone())
-            .chain(enemies.iter().cloned())
-            .collect();
+        if state == GameState::Playing {
+            let snapshot: Vec<Tank> = std::iter::once(player.clone())
+                .chain(enemies.iter().cloned())
+                .collect();
 
-        // --- Игрок ---
-        player.update(dt, &keys_p1, &map, &snapshot, cfg.tile_size);
+            player.update(dt, &keys_p1, &map, &snapshot, cfg.tile_size);
 
-        if is_key_pressed(keys_p1.fire) {
-            let active = bullets
-                .iter()
-                .filter(|b| b.alive && b.owner_id == player.id)
-                .count() as u8;
+            if is_key_pressed(keys_p1.fire) {
+                let active = bullets
+                    .iter()
+                    .filter(|b| b.alive && b.owner_id == player.id)
+                    .count() as u8;
 
-            if let Some(bullet) = player.try_fire(
-                active,
-                &map,
-                cfg.tile_size,
-                cfg.bullet_speed,
-                cfg.bullet_size,
-            ) {
-                bullets.push(bullet);
+                if let Some(bullet) = player.try_fire(
+                    active,
+                    &map,
+                    cfg.tile_size,
+                    cfg.bullet_speed,
+                    cfg.bullet_size,
+                ) {
+                    bullets.push(bullet);
+                }
             }
-        }
 
-        // --- Враги ---
-        for enemy in enemies.iter_mut() {
-            if !enemy.alive { continue; }
+            for enemy in enemies.iter_mut() {
+                if !enemy.alive { continue; }
 
-            let active = bullets
-                .iter()
-                .filter(|b| b.alive && b.owner_id == enemy.id)
-                .count() as u8;
+                let active = bullets
+                    .iter()
+                    .filter(|b| b.alive && b.owner_id == enemy.id)
+                    .count() as u8;
 
-            if let Some(bullet) = enemy.update_ai(
+                if let Some(bullet) = enemy.update_ai(
+                    dt,
+                    &map,
+                    &snapshot,
+                    cfg.tile_size,
+                    cfg.bullet_speed * 0.75,
+                    cfg.bullet_size,
+                    active,
+                ) {
+                    bullets.push(bullet);
+                }
+            }
+
+            let alive_enemies = enemies.iter().filter(|e| e.alive).count();
+            let tanks_for_spawn: Vec<Tank> = std::iter::once(player.clone())
+                .chain(enemies.iter().cloned())
+                .collect();
+
+            if let Some(new_enemy) = spawner.update(
                 dt,
-                &map,
-                &snapshot,
+                alive_enemies,
+                &tanks_for_spawn,
                 cfg.tile_size,
-                cfg.bullet_speed * 0.75,
-                cfg.bullet_size,
-                active,
+                tank_size,
+                cfg.tank_speed * 0.75,
             ) {
-                bullets.push(bullet);
+                enemies.push(new_enemy);
+            }
+
+            let tanks_now: Vec<Tank> = std::iter::once(player.clone())
+                .chain(enemies.iter().cloned())
+                .collect();
+
+            let mut hit_ids: Vec<u32> = Vec::new();
+            for b in bullets.iter_mut() {
+                if let Some(hit_id) = b.update(dt, &mut map, &tanks_now, cfg.tile_size) {
+                    hit_ids.push(hit_id);
+                }
+            }
+
+            Bullet::resolve_mutual_destruction(&mut bullets);
+
+            bullets.retain(|b| b.alive);
+
+            for id in hit_ids {
+                if id == player.id {
+                    player.take_hit();
+                } else if let Some(e) = enemies.iter_mut().find(|e| e.id == id) {
+                    e.take_hit();
+                }
+            }
+
+            enemies.retain(|e| e.alive);
+
+            if map.base_destroyed {
+                state = GameState::Defeat;
+            } else if spawner.remaining_to_spawn == 0 && enemies.is_empty() {
+                state = GameState::Victory;
             }
         }
-
-        // --- Спавн врагов ---
-        // Передаём ВСЕ танки (включая игрока), чтобы спавн не наложился на игрока.
-        let alive_enemies = enemies.iter().filter(|e| e.alive).count();
-        let tanks_for_spawn: Vec<Tank> = std::iter::once(player.clone())
-            .chain(enemies.iter().cloned())
-            .collect();
-
-        if let Some(new_enemy) = spawner.update(
-            dt,
-            alive_enemies,
-            &tanks_for_spawn,
-            cfg.tile_size,
-            tank_size,
-            cfg.tank_speed * 0.75,
-        ) {
-            enemies.push(new_enemy);
-        }
-
-        // ============================================================
-        // 2) Актуальный снимок танков (для проверки попаданий пуль).
-        //    Танки уже сдвинулись в этом кадре.
-        // ============================================================
-        let tanks_now: Vec<Tank> = std::iter::once(player.clone())
-            .chain(enemies.iter().cloned())
-            .collect();
-
-        // --- Пули ---
-        let mut hit_ids: Vec<u32> = Vec::new();
-        for b in bullets.iter_mut() {
-            if let Some(hit_id) = b.update(dt, &mut map, &tanks_now, cfg.tile_size) {
-                hit_ids.push(hit_id);
-            }
-        }
-        bullets.retain(|b| b.alive);
-
-        // Применяем попадания.
-        for id in hit_ids {
-            if id == player.id {
-                player.take_hit();
-            } else if let Some(e) = enemies.iter_mut().find(|e| e.id == id) {
-                e.take_hit();
-            }
-        }
-
-        enemies.retain(|e| e.alive);
 
         // --- Отрисовка ---
         clear_background(BLACK);
@@ -155,6 +173,34 @@ async fn main() {
         for b in bullets.iter() { b.draw(); }
         for enemy in enemies.iter() { enemy.draw(); }
         player.draw();
+
+        match state {
+            GameState::Victory => {
+                let text = "VICTORY";
+                let font_size = 64;
+                let dims = measure_text(text, None, font_size, 1.0);
+                draw_text(
+                    text,
+                    playfield_w / 2.0 - dims.width / 2.0,
+                    playfield_h / 2.0,
+                    font_size as f32,
+                    GREEN,
+                );
+            }
+            GameState::Defeat => {
+                let text = "GAME OVER";
+                let font_size = 64;
+                let dims = measure_text(text, None, font_size, 1.0);
+                draw_text(
+                    text,
+                    playfield_w / 2.0 - dims.width / 2.0,
+                    playfield_h / 2.0,
+                    font_size as f32,
+                    RED,
+                );
+            }
+            GameState::Playing => {}
+        }
 
         set_default_camera();
 

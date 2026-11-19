@@ -34,8 +34,6 @@ impl Bullet {
         }
     }
 
-    /// Обновляет позицию. Возвращает Some(id) танка, в который попали.
-    /// При попадании в танк или блок/границу — пуля умирает.
     pub fn update(
         &mut self,
         dt: f32,
@@ -56,19 +54,16 @@ impl Bullet {
         for _ in 0..steps {
             let next = self.pos + sub_step;
 
-            // 1) Граница поля — пуля просто умирает.
             if self.out_of_bounds(next, map, tile_size) {
                 self.alive = false;
                 return None;
             }
 
-            // 2) Попадание в танк (только чужой команды).
             if let Some(hit_id) = self.hits_tank(next, tanks) {
                 self.alive = false;
                 return Some(hit_id);
             }
 
-            // 3) Попадание в блок.
             if self.collides_tile(next, map, tile_size) {
                 self.damage_hit_tile(next, map, tile_size);
                 self.alive = false;
@@ -90,12 +85,10 @@ impl Bullet {
             || pos.y + self.size > playfield_h
     }
 
-    /// Проверяет AABB с танками. Бьёт только танки ДРУГОЙ команды.
     fn hits_tank(&self, pos: Vec2, tanks: &[Tank]) -> Option<u32> {
         for t in tanks {
             if !t.alive { continue; }
             if t.team == self.owner_team { continue; }
-            // AABB
             if pos.x < t.pos.x + t.size
                 && pos.x + self.size > t.pos.x
                 && pos.y < t.pos.y + t.size
@@ -141,8 +134,38 @@ impl Bullet {
         }
     }
 
+    /// Взаимное уничтожение пуль: если две пули РАЗНЫХ команд пересекаются —
+    /// обе умирают. Вызывать после обновления всех пуль.
+    pub fn resolve_mutual_destruction(bullets: &mut [Bullet]) {
+        let n = bullets.len();
+        for i in 0..n {
+            if !bullets[i].alive { continue; }
+            for j in (i + 1)..n {
+                if !bullets[j].alive { continue; }
+                if bullets[i].owner_team == bullets[j].owner_team { continue; }
+
+                if Self::aabb_overlap(&bullets[i], &bullets[j]) {
+                    bullets[i].alive = false;
+                    bullets[j].alive = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn aabb_overlap(a: &Bullet, b: &Bullet) -> bool {
+        a.pos.x < b.pos.x + b.size
+            && a.pos.x + a.size > b.pos.x
+            && a.pos.y < b.pos.y + b.size
+            && a.pos.y + a.size > b.pos.y
+    }
+
     pub fn draw(&self) {
         if !self.alive { return; }
-        draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, YELLOW);
+        let color = match self.owner_team {
+            Team::Player => YELLOW,
+            Team::Enemy  => LIGHTGRAY,
+        };
+        draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, color);
     }
 }
