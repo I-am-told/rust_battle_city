@@ -30,6 +30,17 @@ async fn main() {
         tank_size,
         cfg.tank_speed,
     );
+    player.id = 0;
+
+    // Один враг сверху для теста.
+    let mut enemies: Vec<Tank> = Vec::new();
+    enemies.push(Tank::new_enemy(
+        vec2(1.0 * cfg.tile_size, 1.0 * cfg.tile_size),
+        Direction::Down,
+        tank_size,
+        cfg.tank_speed * 0.75,
+        1,
+    ));
 
     let mut bullets: Vec<Bullet> = Vec::new();
 
@@ -39,10 +50,9 @@ async fn main() {
         let dt = get_frame_time();
         if is_key_pressed(KeyCode::Escape) { break; }
 
-        // --- Обновление танка ---
+        // --- Игрок ---
         player.update(dt, &keys_p1, &map, cfg.tile_size);
 
-        // --- Стрельба ---
         if is_key_pressed(keys_p1.fire) {
             let active = bullets
                 .iter()
@@ -60,7 +70,26 @@ async fn main() {
             }
         }
 
-        // --- Обновление пуль ---
+        // --- Враги ---
+        for enemy in enemies.iter_mut() {
+            let active = bullets
+                .iter()
+                .filter(|b| b.alive && b.owner_id == enemy.id)
+                .count() as u8;
+
+            if let Some(bullet) = enemy.update_ai(
+                dt,
+                &map,
+                cfg.tile_size,
+                cfg.bullet_speed * 0.75,
+                cfg.bullet_size,
+                active,
+            ) {
+                bullets.push(bullet);
+            }
+        }
+
+        // --- Пули ---
         for b in bullets.iter_mut() {
             b.update(dt, &mut map, cfg.tile_size);
         }
@@ -77,9 +106,8 @@ async fn main() {
         set_camera(&cam);
 
         map.draw(cfg.tile_size);
-        for b in bullets.iter() {
-            b.draw();
-        }
+        for b in bullets.iter() { b.draw(); }
+        for enemy in enemies.iter() { enemy.draw(); }
         player.draw();
 
         set_default_camera();

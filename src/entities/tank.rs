@@ -20,6 +20,25 @@ impl Direction {
             Direction::Right => ivec2( 1,  0),
         }
     }
+
+    pub fn all() -> [Direction; 4] {
+        [Direction::Up, Direction::Down, Direction::Left, Direction::Right]
+    }
+
+    pub fn opposite(self) -> Direction {
+        match self {
+            Direction::Up    => Direction::Down,
+            Direction::Down  => Direction::Up,
+            Direction::Left  => Direction::Right,
+            Direction::Right => Direction::Left,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Team {
+    Player,
+    Enemy,
 }
 
 pub struct Tank {
@@ -27,13 +46,14 @@ pub struct Tank {
     pub direction: Direction,
     pub size: f32,
     pub speed: f32,
-    /// Сколько пуль танк может держать в воздухе одновременно.
     pub max_active_bullets: u8,
-    /// Уникальный идентификатор танка.
     pub id: u32,
-    /// Пробивает ли пуля этого танка сталь.
-    /// Выставляется в true на 4-м ранге (заложено на будущее).
     pub pierces_steel: bool,
+    pub team: Team,
+    pub alive: bool,
+    // --- ИИ ---
+    pub ai_dir_timer: f32,
+    pub ai_shoot_timer: f32,
 }
 
 impl Tank {
@@ -46,7 +66,26 @@ impl Tank {
             max_active_bullets: 1,
             id: 0,
             pierces_steel: false,
+            team: Team::Player,
+            alive: true,
+            ai_dir_timer: 0.0,
+            ai_shoot_timer: 0.0,
         }
+    }
+
+    pub fn new_enemy(
+        pos: Vec2,
+        direction: Direction,
+        size: f32,
+        speed: f32,
+        id: u32,
+    ) -> Self {
+        let mut t = Self::new(pos, direction, size, speed);
+        t.team = Team::Enemy;
+        t.id = id;
+        t.ai_dir_timer = 0.0;
+        t.ai_shoot_timer = 1.0;
+        t
     }
 
     fn tile_origin(&self, tile_size: f32) -> IVec2 {
@@ -109,18 +148,111 @@ impl Tank {
         self.move_along(self.direction, dist, map, tile_size);
     }
 
-    fn turn_to(&mut self, new_dir: Direction, map: &GameMap, tile_size: f32) {
-        self.snap_to_grid(tile_size);
+    /// Простой ИИ врага. Порядок действий:
+    /// 1) если таймер направления истёк — попробовать сменить направление;
+    /// 2) поехать в текущем направлении;
+    /// 3) если упёрлись — принудительно сменить направление (в следующем кадре поедем уже в новом);
+    /// 4) если таймер стрельбы истёк — выстрелить.
+    ///
+    /// `choose_new_direction` больше НЕ вызывает snap_to_grid сам по себе —
+    /// это устраняет «поддёргивание назад» при выборе того же направления.
+    pub fn update_ai(
+        &mut self,
+        dt: f32,
+        map: &GameMap,
+        tile_size: f32,
+        bullet_speed: f32,
+        bullet_size: f32,
+        active_bullets: u8,
+    ) -> Option<Bullet> {
+        if !self.alive {
+            return None;
+        }
 
+        self.ai_dir_timer -= dt;
+
+        // 1) Пора пересмотреть направление?
+        if self.ai_dir_timer <= 0.0 {
+            self.choose_new_direction(map, tile_size);
+            self.ai_dir_timer = 1.0 + rand::gen_range(0.0, 1.5);
+        }
+
+        // 2) Двигаемся в текущем направлении.
+        let before = self.pos;
+        let dist = self.speed * dt;
+        self.move_along(self.direction, dist, map, tile_size);
+        let moved = (self.pos - before).length_squared() > 0.01;
+
+        // 3) Упёрлись — принудительно меняем направление, в этом кадре уже не двигаемся.
+        if !moved {
+            self.choose_new_direction(map, tile_size);
+            self.ai_dir_timer = 1.0 + rand::gen_range(0.0, 1.5);
+        }
+
+        // 4) Стрельба.
+        self.ai_shoot_timer -= dt;
+        if self.ai_shoot_timer <= 0.0 {
+            self.ai_shoot_timer = 1.5 + rand::gen_range(0.0, 1.5);
+            return self.try_fire(active_bullets, map, tile_size, bullet_speed, bullet_size);
+        }
+
+        None
+    }
+
+    /// Выбирает новое направление из свободных.
+    /// НЕ вызывает snap_to_grid и НЕ трогает self.pos.
+    /// Если текущее направление свободно — с некоторой вероятностью оставляет его же
+    /// (но не вынужденно, чтобы не было дёрганья — просто ничего не меняем).
+    /// Если упёрлись — гарантированно выбирает ДРУГОЕ направление.
+    fn choose_new_direction(&mut self, map: &GameMap, tile_size: f32) {
         let origin = self.tile_origin(tile_size);
 
-        // Прямой поворот на месте.
+        // Собираем свободные направления, ИСКЛЮЧАЯ текущее.
+        let mut alternatives: Vec<Direction> = Vec::new();
+        for d in Direction::all() {
+            if d == self.direction {
+                continue;
+            }
+            if self.is_clear_at_grid(origin + d.vector(), map) {
+                alternatives.push(d);
+            }
+        }
+
+        if alternatives.is_empty() {
+            // Не можем уехать никуда, кроме как остаться или развернуться.
+            // Пробуем развернуться, если свободно.
+            let back = self.direction.opposite();
+            if self.is_clear_at_grid(origin + back.vector(), map) {
+                self.direction = back;
+            }
+            // Иначе — стоим, ничего не меняем.
+            return;
+        }
+
+        let idx = rand::gen_range(0, alternatives.len());
+        let new_dir = alternatives[idx];
+
+        // Меняем направление. Snap делаем ТОЛЬКО если реально меняем,
+        // и только если позиция не на сетке (иначе нечего снапить).
+        if new_dir != self.direction {
+            let on_grid = (self.pos.x / tile_size).fract().abs() < 0.001
+                && (self.pos.y / tile_size).fract().abs() < 0.001;
+            if !on_grid {
+                self.snap_to_grid(tile_size);
+            }
+            self.direction = new_dir;
+        }
+    }
+
+    fn turn_to(&mut self, new_dir: Direction, map: &GameMap, tile_size: f32) {
+        self.snap_to_grid(tile_size);
+        let origin = self.tile_origin(tile_size);
+
         if self.is_clear_at_grid(origin + new_dir.vector(), map) {
             self.direction = new_dir;
             return;
         }
 
-        // Пробуем срезать угол: сдвинуться на 1 тайл в старом направлении.
         let old_origin = origin + self.direction.vector();
         if self.is_clear_at_grid(old_origin, map) {
             let check_origin = old_origin + new_dir.vector();
@@ -134,7 +266,6 @@ impl Tank {
             }
         }
 
-        // Не срезалось — только поворачиваем пушку.
         self.direction = new_dir;
     }
 
@@ -161,12 +292,6 @@ impl Tank {
         self.pos = self.pos + axis * moved;
     }
 
-    /// Пробует выстрелить. Возвращает `Some(Bullet)`, если выстрел удался.
-    ///
-    /// В отличие от предыдущей версии, выстрел НЕ отменяется, если дуло упирается
-    /// в стену. Вместо этого пуля спавнится как можно ближе к дулу, но в свободном
-    /// тайле (сдвигаем точку спавна от дула к центру танка, пока не найдём свободное
-    /// место). Так танк стреляет всегда, а пуля сразу врезается в стену и рушит её.
     pub fn try_fire(
         &self,
         active_bullets: u8,
@@ -182,12 +307,8 @@ impl Tank {
         let dir_vec = self.direction.vector();
         let dir_vec_f = vec2(dir_vec.x as f32, dir_vec.y as f32);
         let center = self.pos + vec2(self.size / 2.0, self.size / 2.0);
-
-        // Идеальная точка спавна — чуть впереди дула.
         let muzzle = center + dir_vec_f * (self.size / 2.0 + 1.0);
 
-        // Если там стена — сдвигаем точку к центру танка, пока не окажемся
-        // в свободном тайле. Шаг 0.5 px.
         let mut spawn = muzzle;
         let step_back = 0.5;
         let mut dist_back = 0.0;
@@ -196,21 +317,17 @@ impl Tank {
         while !self.is_bullet_point_free(spawn, map, tile_size) {
             dist_back += step_back;
             if dist_back > max_back {
-                // Даже центр танка в стене — не стреляем (защита от багов).
                 return None;
             }
             spawn = muzzle - dir_vec_f * dist_back;
         }
 
-        // Позиция верхнего левого угла пули, чтобы её центр был в spawn.
         let pos = spawn - vec2(bullet_size / 2.0, bullet_size / 2.0);
-
         let mut bullet = Bullet::new(pos, self.direction, bullet_speed, bullet_size, self.id);
         bullet.pierces_steel = self.pierces_steel;
         Some(bullet)
     }
 
-    /// Свободна ли точка `p` с точки зрения полёта пули (вода не мешает).
     fn is_bullet_point_free(&self, p: Vec2, map: &GameMap, tile_size: f32) -> bool {
         let tx = (p.x / tile_size).floor() as i32;
         let ty = (p.y / tile_size).floor() as i32;
@@ -218,12 +335,17 @@ impl Tank {
     }
 
     pub fn draw(&self) {
-        draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, GREEN);
+        if !self.alive { return; }
+        let color = match self.team {
+            Team::Player => GREEN,
+            Team::Enemy  => RED,
+        };
+        draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, color);
         draw_rectangle_lines(self.pos.x, self.pos.y, self.size, self.size, 4.0, WHITE);
 
         let center = self.pos + vec2(self.size / 2.0, self.size / 2.0);
         let v = self.direction.vector();
         let tip = center + vec2(v.x as f32, v.y as f32) * (self.size / 2.0);
-        draw_line(center.x, center.y, tip.x, tip.y, self.size * 0.2, RED);
+        draw_line(center.x, center.y, tip.x, tip.y, self.size * 0.2, WHITE);
     }
 }

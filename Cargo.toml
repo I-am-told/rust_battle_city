@@ -8,3 +8,4 @@ macroquad = "0.4"
 serde = { version = "1", features = ["derive"] }
 ron = "0.8"
 config = "0.15.27"
+rand = "0.8"
