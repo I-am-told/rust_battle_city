@@ -44,8 +44,17 @@ async fn main() {
         let dt = get_frame_time();
         if is_key_pressed(KeyCode::Escape) { break; }
 
+        // ============================================================
+        // 1) Снимок всех танков на НАЧАЛО кадра.
+        //    Используется и для игрока, и для всех врагов в этом кадре.
+        //    Внутри Tank::overlaps_other_tank себя по id отсеиваем.
+        // ============================================================
+        let snapshot: Vec<Tank> = std::iter::once(player.clone())
+            .chain(enemies.iter().cloned())
+            .collect();
+
         // --- Игрок ---
-        player.update(dt, &keys_p1, &map, cfg.tile_size);
+        player.update(dt, &keys_p1, &map, &snapshot, cfg.tile_size);
 
         if is_key_pressed(keys_p1.fire) {
             let active = bullets
@@ -65,8 +74,10 @@ async fn main() {
         }
 
         // --- Враги ---
+        // Снимок `snapshot` уже сделан до мутабельного доступа к enemies.
         for enemy in enemies.iter_mut() {
             if !enemy.alive { continue; }
+
             let active = bullets
                 .iter()
                 .filter(|b| b.alive && b.owner_id == enemy.id)
@@ -75,6 +86,7 @@ async fn main() {
             if let Some(bullet) = enemy.update_ai(
                 dt,
                 &map,
+                &snapshot,
                 cfg.tile_size,
                 cfg.bullet_speed * 0.75,
                 cfg.bullet_size,
@@ -97,7 +109,6 @@ async fn main() {
             enemies.push(new_enemy);
         }
 
-        // Убираем мёртвых, чтобы вектор не пух.
         enemies.retain(|e| e.alive);
 
         // --- Пули ---

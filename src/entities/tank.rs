@@ -41,6 +41,7 @@ pub enum Team {
     Enemy,
 }
 
+#[derive(Clone)]
 pub struct Tank {
     pub pos: Vec2,
     pub direction: Direction,
@@ -94,10 +95,19 @@ impl Tank {
         ivec2(tx, ty)
     }
 
-    /// Свободна ли (в терминах тайлов) позиция, если танк стоит от `origin` (2×2).
-    /// Включает проверку выхода за границы поля.
-    fn is_clear_at_grid(&self, origin: IVec2, map: &GameMap) -> bool {
-        // Границы поля — жёсткая стена.
+    /// Пересекается ли танк, стоящий в пробной позиции `pos`, с другим танком.
+    /// Себя и мёртвых пропускаем.
+    fn overlaps_other_tank(&self, pos: Vec2, other: &Tank) -> bool {
+        if other.id == self.id || !other.alive {
+            return false;
+        }
+        pos.x < other.pos.x + other.size
+            && pos.x + self.size > other.pos.x
+            && pos.y < other.pos.y + other.size
+            && pos.y + self.size > other.pos.y
+    }
+
+    fn is_clear_at_grid(&self, origin: IVec2, map: &GameMap, others: &[Tank], tile_size: f32) -> bool {
         if origin.x < 0 || origin.y < 0 {
             return false;
         }
@@ -111,15 +121,20 @@ impl Tank {
                 }
             }
         }
+        // Проверка столкновения с другими танками (по AABB с реальными позициями).
+        let probe = vec2(origin.x as f32 * tile_size, origin.y as f32 * tile_size);
+        for other in others {
+            if self.overlaps_other_tank(probe, other) {
+                return false;
+            }
+        }
         true
     }
 
-    /// Свободна ли (в пикселях) позиция `pos`. Включает проверку границ поля.
-    fn is_clear_at_px(&self, pos: Vec2, map: &GameMap, tile_size: f32) -> bool {
+    fn is_clear_at_px(&self, pos: Vec2, map: &GameMap, others: &[Tank], tile_size: f32) -> bool {
         let playfield_w = map.width as f32 * tile_size;
         let playfield_h = map.height as f32 * tile_size;
 
-        // Границы поля.
         if pos.x < 0.0 || pos.y < 0.0 {
             return false;
         }
@@ -140,6 +155,13 @@ impl Tank {
                 }
             }
         }
+
+        for other in others {
+            if self.overlaps_other_tank(pos, other) {
+                return false;
+            }
+        }
+
         true
     }
 
@@ -149,7 +171,14 @@ impl Tank {
         self.pos = vec2(tx * tile_size, ty * tile_size);
     }
 
-    pub fn update(&mut self, dt: f32, keys: &KeyBindings, map: &GameMap, tile_size: f32) {
+    pub fn update(
+        &mut self,
+        dt: f32,
+        keys: &KeyBindings,
+        map: &GameMap,
+        others: &[Tank],
+        tile_size: f32,
+    ) {
         let mut desired: Option<Direction> = None;
         if is_key_down(keys.up)    { desired = Some(Direction::Up); }
         if is_key_down(keys.down)  { desired = Some(Direction::Down); }
@@ -162,17 +191,18 @@ impl Tank {
         };
 
         if desired != self.direction {
-            self.turn_to(desired, map, tile_size);
+            self.turn_to(desired, map, others, tile_size);
         }
 
         let dist = self.speed * dt;
-        self.move_along(self.direction, dist, map, tile_size);
+        self.move_along(self.direction, dist, map, others, tile_size);
     }
 
     pub fn update_ai(
         &mut self,
         dt: f32,
         map: &GameMap,
+        others: &[Tank],
         tile_size: f32,
         bullet_speed: f32,
         bullet_size: f32,
@@ -185,17 +215,17 @@ impl Tank {
         self.ai_dir_timer -= dt;
 
         if self.ai_dir_timer <= 0.0 {
-            self.choose_new_direction(map, tile_size);
+            self.choose_new_direction(map, others, tile_size);
             self.ai_dir_timer = 2.0 + rand::gen_range(0.0, 2.0);
         }
 
         let before = self.pos;
         let dist = self.speed * dt;
-        self.move_along(self.direction, dist, map, tile_size);
+        self.move_along(self.direction, dist, map, others, tile_size);
         let moved = (self.pos - before).length_squared() > 0.01;
 
         if !moved {
-            self.choose_new_direction(map, tile_size);
+            self.choose_new_direction(map, others, tile_size);
             self.ai_dir_timer = 2.0 + rand::gen_range(0.0, 2.0);
         }
 
@@ -208,7 +238,7 @@ impl Tank {
         None
     }
 
-    fn choose_new_direction(&mut self, map: &GameMap, tile_size: f32) {
+    fn choose_new_direction(&mut self, map: &GameMap, others: &[Tank], tile_size: f32) {
         let origin = self.tile_origin(tile_size);
 
         let mut alternatives: Vec<Direction> = Vec::new();
@@ -216,14 +246,14 @@ impl Tank {
             if d == self.direction {
                 continue;
             }
-            if self.is_clear_at_grid(origin + d.vector(), map) {
+            if self.is_clear_at_grid(origin + d.vector(), map, others, tile_size) {
                 alternatives.push(d);
             }
         }
 
         if alternatives.is_empty() {
             let back = self.direction.opposite();
-            if self.is_clear_at_grid(origin + back.vector(), map) {
+            if self.is_clear_at_grid(origin + back.vector(), map, others, tile_size) {
                 self.direction = back;
             }
             return;
@@ -242,19 +272,19 @@ impl Tank {
         }
     }
 
-    fn turn_to(&mut self, new_dir: Direction, map: &GameMap, tile_size: f32) {
+    fn turn_to(&mut self, new_dir: Direction, map: &GameMap, others: &[Tank], tile_size: f32) {
         self.snap_to_grid(tile_size);
         let origin = self.tile_origin(tile_size);
 
-        if self.is_clear_at_grid(origin + new_dir.vector(), map) {
+        if self.is_clear_at_grid(origin + new_dir.vector(), map, others, tile_size) {
             self.direction = new_dir;
             return;
         }
 
         let old_origin = origin + self.direction.vector();
-        if self.is_clear_at_grid(old_origin, map) {
+        if self.is_clear_at_grid(old_origin, map, others, tile_size) {
             let check_origin = old_origin + new_dir.vector();
-            if self.is_clear_at_grid(check_origin, map) {
+            if self.is_clear_at_grid(check_origin, map, others, tile_size) {
                 self.pos = vec2(
                     old_origin.x as f32 * tile_size,
                     old_origin.y as f32 * tile_size,
@@ -267,11 +297,18 @@ impl Tank {
         self.direction = new_dir;
     }
 
-    fn move_along(&mut self, dir: Direction, dist: f32, map: &GameMap, tile_size: f32) {
+    fn move_along(
+        &mut self,
+        dir: Direction,
+        dist: f32,
+        map: &GameMap,
+        others: &[Tank],
+        tile_size: f32,
+    ) {
         let axis = vec2(dir.vector().x as f32, dir.vector().y as f32);
         let target = self.pos + axis * dist;
 
-        if self.is_clear_at_px(target, map, tile_size) {
+        if self.is_clear_at_px(target, map, others, tile_size) {
             self.pos = target;
             return;
         }
@@ -281,7 +318,7 @@ impl Tank {
         while moved < dist.abs() {
             let advance = chunk.min(dist.abs() - moved);
             let try_pos = self.pos + axis * (moved + advance);
-            if self.is_clear_at_px(try_pos, map, tile_size) {
+            if self.is_clear_at_px(try_pos, map, others, tile_size) {
                 moved += advance;
             } else {
                 break;
@@ -326,8 +363,6 @@ impl Tank {
         Some(bullet)
     }
 
-    /// Свободна ли точка `p` для спавна пули.
-    /// Вода не мешает, границы поля — мешают.
     fn is_bullet_point_free(&self, p: Vec2, map: &GameMap, tile_size: f32) -> bool {
         let playfield_w = map.width as f32 * tile_size;
         let playfield_h = map.height as f32 * tile_size;
