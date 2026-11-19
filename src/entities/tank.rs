@@ -89,14 +89,19 @@ impl Tank {
         t
     }
 
+    /// Применить попадание. Пока просто убивает танк.
+    /// Позже — уменьшение HP, respawn игрока и т.п.
+    pub fn take_hit(&mut self) {
+        if !self.alive { return; }
+        self.alive = false;
+    }
+
     fn tile_origin(&self, tile_size: f32) -> IVec2 {
         let tx = (self.pos.x / tile_size).round() as i32;
         let ty = (self.pos.y / tile_size).round() as i32;
         ivec2(tx, ty)
     }
 
-    /// Пересекается ли танк, стоящий в пробной позиции `pos`, с другим танком.
-    /// Себя и мёртвых пропускаем.
     fn overlaps_other_tank(&self, pos: Vec2, other: &Tank) -> bool {
         if other.id == self.id || !other.alive {
             return false;
@@ -121,7 +126,6 @@ impl Tank {
                 }
             }
         }
-        // Проверка столкновения с другими танками (по AABB с реальными позициями).
         let probe = vec2(origin.x as f32 * tile_size, origin.y as f32 * tile_size);
         for other in others {
             if self.overlaps_other_tank(probe, other) {
@@ -179,6 +183,7 @@ impl Tank {
         others: &[Tank],
         tile_size: f32,
     ) {
+        if !self.alive { return; }
         let mut desired: Option<Direction> = None;
         if is_key_down(keys.up)    { desired = Some(Direction::Up); }
         if is_key_down(keys.down)  { desired = Some(Direction::Down); }
@@ -358,7 +363,14 @@ impl Tank {
         }
 
         let pos = spawn - vec2(bullet_size / 2.0, bullet_size / 2.0);
-        let mut bullet = Bullet::new(pos, self.direction, bullet_speed, bullet_size, self.id);
+        let mut bullet = Bullet::new(
+            pos,
+            self.direction,
+            bullet_speed,
+            bullet_size,
+            self.id,
+            self.team,
+        );
         bullet.pierces_steel = self.pierces_steel;
         Some(bullet)
     }

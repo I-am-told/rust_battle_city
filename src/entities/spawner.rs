@@ -10,6 +10,11 @@ pub struct EnemySpawner {
     /// Индекс текущей точки спавна в очереди.
     next_point: usize,
     pub remaining_to_spawn: u32,
+    /// Максимум врагов ОДНОВРЕМЕННО на поле.
+    /// ЗАДЕЛ НА БУДУЩЕЕ: в Battle City это зависит от уровня игры —
+    /// на высоких уровнях одновременно может быть больше врагов.
+    /// Сейчас задаётся при создании спавнера, позже будем менять при
+    /// переходе между уровнями.
     pub max_on_field: u32,
     next_id: u32,
     spawn_points: Vec<IVec2>,
@@ -45,11 +50,14 @@ impl EnemySpawner {
         ]
     }
 
+    /// `all_tanks` — ВСЕ танки на поле (враги И игрок), чтобы корректно
+    /// проверять занятость точки спавна. Раньше передавались только враги,
+    /// из-за чего враг мог заспавниться в игрока.
     pub fn update(
         &mut self,
         dt: f32,
         current_enemies: usize,
-        enemies: &[Tank],
+        all_tanks: &[Tank],
         tile_size: f32,
         tank_size: f32,
         tank_speed: f32,
@@ -70,8 +78,8 @@ impl EnemySpawner {
         let tile = self.spawn_points[self.next_point];
         let pos = vec2(tile.x as f32 * tile_size, tile.y as f32 * tile_size);
 
-        if Self::point_occupied_by_tank(pos, tank_size, enemies) {
-            // Точка занята — откладываем, указатель НЕ двигаем.
+        if Self::point_occupied_by_tank(pos, tank_size, all_tanks) {
+            // Точка занята (врагом ИЛИ игроком) — откладываем, указатель НЕ двигаем.
             self.timer = self.retry_interval;
             return None;
         }
@@ -87,13 +95,13 @@ impl EnemySpawner {
         Some(Tank::new_enemy(pos, Direction::Down, tank_size, tank_speed, id))
     }
 
-    fn point_occupied_by_tank(pos: Vec2, tank_size: f32, enemies: &[Tank]) -> bool {
-        for e in enemies {
-            if !e.alive {
+    fn point_occupied_by_tank(pos: Vec2, tank_size: f32, tanks: &[Tank]) -> bool {
+        for t in tanks {
+            if !t.alive {
                 continue;
             }
-            let dx = (e.pos.x - pos.x).abs();
-            let dy = (e.pos.y - pos.y).abs();
+            let dx = (t.pos.x - pos.x).abs();
+            let dy = (t.pos.y - pos.y).abs();
             if dx < tank_size && dy < tank_size {
                 return true;
             }

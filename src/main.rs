@@ -34,6 +34,8 @@ async fn main() {
     player.id = 0;
 
     let mut enemies: Vec<Tank> = Vec::new();
+    // 10 врагов всего за уровень, 3 одновременно. Позже max_on_field будет
+    // зависеть от уровня игры (см. комментарий в EnemySpawner).
     let mut spawner = EnemySpawner::new(10, 3, cfg.grid_width);
 
     let mut bullets: Vec<Bullet> = Vec::new();
@@ -45,9 +47,7 @@ async fn main() {
         if is_key_pressed(KeyCode::Escape) { break; }
 
         // ============================================================
-        // 1) Снимок всех танков на НАЧАЛО кадра.
-        //    Используется и для игрока, и для всех врагов в этом кадре.
-        //    Внутри Tank::overlaps_other_tank себя по id отсеиваем.
+        // 1) Снимок танков на начало кадра — для коллизий танк-танк.
         // ============================================================
         let snapshot: Vec<Tank> = std::iter::once(player.clone())
             .chain(enemies.iter().cloned())
@@ -74,7 +74,6 @@ async fn main() {
         }
 
         // --- Враги ---
-        // Снимок `snapshot` уже сделан до мутабельного доступа к enemies.
         for enemy in enemies.iter_mut() {
             if !enemy.alive { continue; }
 
@@ -97,11 +96,16 @@ async fn main() {
         }
 
         // --- Спавн врагов ---
+        // Передаём ВСЕ танки (включая игрока), чтобы спавн не наложился на игрока.
         let alive_enemies = enemies.iter().filter(|e| e.alive).count();
+        let tanks_for_spawn: Vec<Tank> = std::iter::once(player.clone())
+            .chain(enemies.iter().cloned())
+            .collect();
+
         if let Some(new_enemy) = spawner.update(
             dt,
             alive_enemies,
-            &enemies,
+            &tanks_for_spawn,
             cfg.tile_size,
             tank_size,
             cfg.tank_speed * 0.75,
@@ -109,13 +113,33 @@ async fn main() {
             enemies.push(new_enemy);
         }
 
-        enemies.retain(|e| e.alive);
+        // ============================================================
+        // 2) Актуальный снимок танков (для проверки попаданий пуль).
+        //    Танки уже сдвинулись в этом кадре.
+        // ============================================================
+        let tanks_now: Vec<Tank> = std::iter::once(player.clone())
+            .chain(enemies.iter().cloned())
+            .collect();
 
         // --- Пули ---
+        let mut hit_ids: Vec<u32> = Vec::new();
         for b in bullets.iter_mut() {
-            b.update(dt, &mut map, cfg.tile_size);
+            if let Some(hit_id) = b.update(dt, &mut map, &tanks_now, cfg.tile_size) {
+                hit_ids.push(hit_id);
+            }
         }
         bullets.retain(|b| b.alive);
+
+        // Применяем попадания.
+        for id in hit_ids {
+            if id == player.id {
+                player.take_hit();
+            } else if let Some(e) = enemies.iter_mut().find(|e| e.id == id) {
+                e.take_hit();
+            }
+        }
+
+        enemies.retain(|e| e.alive);
 
         // --- Отрисовка ---
         clear_background(BLACK);

@@ -1,6 +1,6 @@
 use macroquad::prelude::*;
 use crate::map::GameMap;
-use crate::entities::tank::Direction;
+use crate::entities::tank::{Direction, Tank, Team};
 
 pub struct Bullet {
     pub pos: Vec2,
@@ -8,25 +8,42 @@ pub struct Bullet {
     pub speed: f32,
     pub size: f32,
     pub owner_id: u32,
+    pub owner_team: Team,
     pub alive: bool,
     pub pierces_steel: bool,
 }
 
 impl Bullet {
-    pub fn new(pos: Vec2, direction: Direction, speed: f32, size: f32, owner_id: u32) -> Self {
+    pub fn new(
+        pos: Vec2,
+        direction: Direction,
+        speed: f32,
+        size: f32,
+        owner_id: u32,
+        owner_team: Team,
+    ) -> Self {
         Self {
             pos,
             direction,
             speed,
             size,
             owner_id,
+            owner_team,
             alive: true,
             pierces_steel: false,
         }
     }
 
-    pub fn update(&mut self, dt: f32, map: &mut GameMap, tile_size: f32) {
-        if !self.alive { return; }
+    /// Обновляет позицию. Возвращает Some(id) танка, в который попали.
+    /// При попадании в танк или блок/границу — пуля умирает.
+    pub fn update(
+        &mut self,
+        dt: f32,
+        map: &mut GameMap,
+        tanks: &[Tank],
+        tile_size: f32,
+    ) -> Option<u32> {
+        if !self.alive { return None; }
 
         let v = self.direction.vector();
         let step = vec2(v.x as f32, v.y as f32) * self.speed * dt;
@@ -38,17 +55,30 @@ impl Bullet {
 
         for _ in 0..steps {
             let next = self.pos + sub_step;
+
+            // 1) Граница поля — пуля просто умирает.
             if self.out_of_bounds(next, map, tile_size) {
                 self.alive = false;
-                return;
+                return None;
             }
+
+            // 2) Попадание в танк (только чужой команды).
+            if let Some(hit_id) = self.hits_tank(next, tanks) {
+                self.alive = false;
+                return Some(hit_id);
+            }
+
+            // 3) Попадание в блок.
             if self.collides_tile(next, map, tile_size) {
                 self.damage_hit_tile(next, map, tile_size);
                 self.alive = false;
-                return;
+                return None;
             }
+
             self.pos = next;
         }
+
+        None
     }
 
     fn out_of_bounds(&self, pos: Vec2, map: &GameMap, tile_size: f32) -> bool {
@@ -58,6 +88,23 @@ impl Bullet {
             || pos.y < 0.0
             || pos.x + self.size > playfield_w
             || pos.y + self.size > playfield_h
+    }
+
+    /// Проверяет AABB с танками. Бьёт только танки ДРУГОЙ команды.
+    fn hits_tank(&self, pos: Vec2, tanks: &[Tank]) -> Option<u32> {
+        for t in tanks {
+            if !t.alive { continue; }
+            if t.team == self.owner_team { continue; }
+            // AABB
+            if pos.x < t.pos.x + t.size
+                && pos.x + self.size > t.pos.x
+                && pos.y < t.pos.y + t.size
+                && pos.y + self.size > t.pos.y
+            {
+                return Some(t.id);
+            }
+        }
+        None
     }
 
     fn collides_tile(&self, pos: Vec2, map: &GameMap, tile_size: f32) -> bool {
