@@ -10,7 +10,7 @@ use map::GameMap;
 use entities::tank::{Tank, Direction};
 use entities::bullet::Bullet;
 use entities::spawner::EnemySpawner;
-use entities::bonus::Bonus;
+use entities::bonus::{Bonus, BonusKind};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum GameState {
@@ -63,6 +63,8 @@ async fn main() {
 
     let mut bullets: Vec<Bullet> = Vec::new();
     let mut bonuses: Vec<Bonus> = Vec::new();
+
+    let mut picked_bonuses: u32 = 0;
 
     let mut state = GameState::Playing;
 
@@ -188,9 +190,7 @@ async fn main() {
                 }
             }
 
-            // Спавним бонусы в случайных свободных местах.
             if pending_bonuses > 0 {
-                // Запрещённые тайлы: точки спавна врагов + тайл игрока.
                 let mut forbidden: Vec<IVec2> = spawner.spawn_points().to_vec();
                 forbidden.push(player_spawn_tile);
 
@@ -201,7 +201,6 @@ async fn main() {
                             tile.y as f32 * cfg.tile_size,
                         );
                         bonuses.push(Bonus::new(pos, cfg.tile_size, BONUS_LIFETIME));
-                        // Добавим в forbidden, чтобы два бонуса не легли в одну клетку.
                         forbidden.push(tile);
                     }
                 }
@@ -212,6 +211,23 @@ async fn main() {
             for b in bonuses.iter_mut() {
                 b.update(dt);
             }
+
+            // --- Подбор бонусов игроком ---
+            if player.alive {
+                for b in bonuses.iter_mut() {
+                    if b.try_pickup(player.pos, player.size) {
+                        picked_bonuses += 1;
+                        // Эффекты будут в шаге 6.3. Пока — лог.
+                        println!(
+                            "Picked bonus: {:?} (total picked: {})",
+                            b.kind, picked_bonuses
+                        );
+                        // TODO: применить эффект (см. шаг 6.3)
+                        let _ = b.kind;
+                    }
+                }
+            }
+
             bonuses.retain(|b| b.alive);
 
             if map.base_destroyed {
@@ -281,6 +297,13 @@ async fn main() {
             ),
             10.0,
             48.0,
+            20.0,
+            LIGHTGRAY,
+        );
+        draw_text(
+            &format!("BONUSES PICKED: {}", picked_bonuses),
+            10.0,
+            72.0,
             20.0,
             LIGHTGRAY,
         );

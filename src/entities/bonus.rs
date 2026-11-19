@@ -68,10 +68,26 @@ impl Bonus {
         }
     }
 
+    /// Проверяет, пересекается ли бонус с танком, стоящим в `tank_pos`
+    /// с размером `tank_size`. При пересечении бонус помечается подобранным.
+    /// Возвращает true, если подобрали.
+    pub fn try_pickup(&mut self, tank_pos: Vec2, tank_size: f32) -> bool {
+        if !self.alive { return false; }
+        if tank_pos.x < self.pos.x + self.size
+            && tank_pos.x + tank_size > self.pos.x
+            && tank_pos.y < self.pos.y + self.size
+            && tank_pos.y + tank_size > self.pos.y
+        {
+            self.alive = false;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn draw(&self) {
         if !self.alive { return; }
 
-        // Мигание: 5 раз в секунду.
         let phase = ((get_time() * 5.0) as i32) % 2;
         if phase != 0 { return; }
 
@@ -79,7 +95,6 @@ impl Bonus {
         draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, c);
         draw_rectangle_lines(self.pos.x, self.pos.y, self.size, self.size, 2.0, WHITE);
 
-        // Символ по центру.
         let text = self.kind.symbol();
         let font_size = (self.size * 0.6) as u16;
         let dims = measure_text(text, None, font_size, 1.0);
