@@ -7,8 +7,8 @@ use macroquad::prelude::*;
 use config::load_config;
 use input::KeyBindings;
 use map::GameMap;
-use entities::tank::Tank;
-use crate::entities::tank::Direction;
+use entities::tank::{Tank, Direction};
+use entities::bullet::Bullet;
 
 #[macroquad::main("Battle City (Rust)")]
 async fn main() {
@@ -31,14 +31,42 @@ async fn main() {
         cfg.tank_speed,
     );
 
+    let mut bullets: Vec<Bullet> = Vec::new();
+
     request_new_screen_size(playfield_w, playfield_h);
 
     loop {
         let dt = get_frame_time();
         if is_key_pressed(KeyCode::Escape) { break; }
 
+        // --- Обновление танка ---
         player.update(dt, &keys_p1, &map, cfg.tile_size);
 
+        // --- Стрельба ---
+        if is_key_pressed(keys_p1.fire) {
+            let active = bullets
+                .iter()
+                .filter(|b| b.alive && b.owner_id == player.id)
+                .count() as u8;
+
+            if let Some(bullet) = player.try_fire(
+                active,
+                &map,
+                cfg.tile_size,
+                cfg.bullet_speed,
+                cfg.bullet_size,
+            ) {
+                bullets.push(bullet);
+            }
+        }
+
+        // --- Обновление пуль ---
+        for b in bullets.iter_mut() {
+            b.update(dt, &map, cfg.tile_size);
+        }
+        bullets.retain(|b| b.alive);
+
+        // --- Отрисовка ---
         clear_background(BLACK);
 
         let cam = Camera2D {
@@ -49,6 +77,9 @@ async fn main() {
         set_camera(&cam);
 
         map.draw(cfg.tile_size);
+        for b in bullets.iter() {
+            b.draw();
+        }
         player.draw();
 
         set_default_camera();

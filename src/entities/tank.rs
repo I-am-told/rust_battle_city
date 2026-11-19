@@ -1,6 +1,7 @@
 use macroquad::prelude::*;
 use crate::input::KeyBindings;
 use crate::map::GameMap;
+use crate::entities::bullet::Bullet;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Direction {
@@ -26,21 +27,31 @@ pub struct Tank {
     pub direction: Direction,
     pub size: f32,
     pub speed: f32,
+    /// Сколько пуль танк может держать в воздухе одновременно.
+    /// Пока 1. С ростом ранга будем увеличивать (2, 3, ...).
+    pub max_active_bullets: u8,
+    /// Уникальный идентификатор танка (0 — игрок; врагам дадим 1, 2, ...).
+    pub id: u32,
 }
 
 impl Tank {
     pub fn new(pos: Vec2, direction: Direction, size: f32, speed: f32) -> Self {
-        Self { pos, direction, size, speed }
+        Self {
+            pos,
+            direction,
+            size,
+            speed,
+            max_active_bullets: 1,
+            id: 0,
+        }
     }
 
-    /// Тайловый индекс левого верхнего тайла танка (позиция уже выровнена по сетке).
     fn tile_origin(&self, tile_size: f32) -> IVec2 {
         let tx = (self.pos.x / tile_size).round() as i32;
         let ty = (self.pos.y / tile_size).round() as i32;
         ivec2(tx, ty)
     }
 
-    /// Проверка занятости по ЦЕЛЫМ тайлам от origin — для логики поворота.
     fn is_clear_at_grid(&self, origin: IVec2, map: &GameMap) -> bool {
         for dy in 0..2 {
             for dx in 0..2 {
@@ -52,8 +63,6 @@ impl Tank {
         true
     }
 
-    /// Проверка занятости по ПИКСЕЛЯМ — для плавного движения.
-    /// Учитывает оба края танка, чтобы не «заехать» за границу тайла.
     fn is_clear_at_px(&self, pos: Vec2, map: &GameMap, tile_size: f32) -> bool {
         let epsilon = 0.001;
         let left   = (pos.x / tile_size).floor() as i32;
@@ -71,7 +80,6 @@ impl Tank {
         true
     }
 
-    /// Принудительно выровнять позицию по сетке тайлов.
     fn snap_to_grid(&mut self, tile_size: f32) {
         let tx = (self.pos.x / tile_size).round();
         let ty = (self.pos.y / tile_size).round();
@@ -103,9 +111,8 @@ impl Tank {
 
         let origin = self.tile_origin(tile_size);
 
-        // Шаг в новом направлении возможен?
-        let next_origin = origin + new_dir.vector();
-        if self.is_clear_at_grid(next_origin, map) {
+        // Прямой поворот на месте.
+        if self.is_clear_at_grid(origin + new_dir.vector(), map) {
             self.direction = new_dir;
             return;
         }
@@ -113,7 +120,6 @@ impl Tank {
         // Пробуем срезать угол: сдвинуться на 1 тайл в старом направлении.
         let old_origin = origin + self.direction.vector();
         if self.is_clear_at_grid(old_origin, map) {
-            // Проверим: из новой позиции шаг в новом направлении свободен?
             let check_origin = old_origin + new_dir.vector();
             if self.is_clear_at_grid(check_origin, map) {
                 self.pos = vec2(
@@ -138,7 +144,6 @@ impl Tank {
             return;
         }
 
-        // Упираемся: двигаемся вплотную к препятствию с шагом 0.5 px.
         let chunk: f32 = 0.5;
         let mut moved: f32 = 0.0;
         while moved < dist.abs() {
@@ -151,6 +156,42 @@ impl Tank {
             }
         }
         self.pos = self.pos + axis * moved;
+    }
+
+    /// Пробует выстрелить. Возвращает `Some(Bullet)`, если выстрел удался.
+    /// `active_bullets` — сколько пуль этого танка сейчас в воздухе.
+    /// Если `active_bullets >= max_active_bullets` — не стреляем.
+    /// Если дуло упирается в стену — не стреляем (чтобы пуля не спавнилась в блоке).
+    pub fn try_fire(
+        &self,
+        active_bullets: u8,
+        map: &GameMap,
+        tile_size: f32,
+        bullet_speed: f32,
+        bullet_size: f32,
+    ) -> Option<Bullet> {
+        if active_bullets >= self.max_active_bullets {
+            return None;
+        }
+
+        let dir_vec = self.direction.vector();
+        let dir_vec_f = vec2(dir_vec.x as f32, dir_vec.y as f32);
+        let center = self.pos + vec2(self.size / 2.0, self.size / 2.0);
+
+        // Точка появления пули — чуть впереди дула.
+        let muzzle = center + dir_vec_f * (self.size / 2.0 + 1.0);
+
+        // Если дуло в стене — не стреляем.
+        let mtx = (muzzle.x / tile_size).floor() as i32;
+        let mty = (muzzle.y / tile_size).floor() as i32;
+        if map.is_blocked(mtx, mty) {
+            return None;
+        }
+
+        // Позиция верхнего левого угла пули, чтобы её центр был в muzzle.
+        let pos = muzzle - vec2(bullet_size / 2.0, bullet_size / 2.0);
+
+        Some(Bullet::new(pos, self.direction, bullet_speed, bullet_size, self.id))
     }
 
     pub fn draw(&self) {

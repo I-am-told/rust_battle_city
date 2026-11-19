@@ -17,6 +17,8 @@ pub struct Config {
     pub grid_width: i32,
     pub grid_height: i32,
     pub tank_speed: f32,
+    pub bullet_speed: f32,
+    pub bullet_size: f32,
     pub player1_keys: PlayerKeys,
 }
 
@@ -27,6 +29,8 @@ impl Default for Config {
             grid_width: 13,
             grid_height: 13,
             tank_speed: 120.0,
+            bullet_speed: 300.0,
+            bullet_size: 6.0,
             player1_keys: PlayerKeys {
                 up: "W".into(),
                 down: "S".into(),
