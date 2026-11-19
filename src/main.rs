@@ -2,6 +2,7 @@ mod config;
 mod input;
 mod map;
 mod entities;
+mod game;
 
 use macroquad::prelude::*;
 use config::load_config;
@@ -10,7 +11,8 @@ use map::GameMap;
 use entities::tank::{Tank, Direction};
 use entities::bullet::Bullet;
 use entities::spawner::EnemySpawner;
-use entities::bonus::{Bonus, BonusKind};
+use entities::bonus::Bonus;
+use game::bonuses::apply_bonus;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum GameState {
@@ -20,6 +22,7 @@ enum GameState {
 }
 
 const BONUS_LIFETIME: f32 = 15.0;
+const MAX_RANK: u8 = 3;
 
 #[macroquad::main("Battle City (Rust)")]
 async fn main() {
@@ -53,13 +56,14 @@ async fn main() {
         cfg.tank_speed,
     );
     player.id = 0;
+    player.apply_rank(0);
 
     let mut player_lives: u32 = 3;
     let mut respawn_timer: f32 = 0.0;
     let mut invuln_timer: f32 = 0.0;
 
     let mut enemies: Vec<Tank> = Vec::new();
-    let mut spawner = EnemySpawner::new(10, 3, cfg.grid_width);
+    let mut spawner = EnemySpawner::new(100, 3, cfg.grid_width);
 
     let mut bullets: Vec<Bullet> = Vec::new();
     let mut bonuses: Vec<Bonus> = Vec::new();
@@ -212,18 +216,17 @@ async fn main() {
                 b.update(dt);
             }
 
-            // --- Подбор бонусов игроком ---
             if player.alive {
                 for b in bonuses.iter_mut() {
                     if b.try_pickup(player.pos, player.size) {
                         picked_bonuses += 1;
-                        // Эффекты будут в шаге 6.3. Пока — лог.
-                        println!(
-                            "Picked bonus: {:?} (total picked: {})",
-                            b.kind, picked_bonuses
+                        apply_bonus(
+                            b.kind,
+                            &mut player,
+                            &mut player_lives,
+                            &mut enemies,
+                            MAX_RANK,
                         );
-                        // TODO: применить эффект (см. шаг 6.3)
-                        let _ = b.kind;
                     }
                 }
             }
@@ -304,6 +307,13 @@ async fn main() {
             &format!("BONUSES PICKED: {}", picked_bonuses),
             10.0,
             72.0,
+            20.0,
+            LIGHTGRAY,
+        );
+        draw_text(
+            &format!("RANK: {}", player.rank),
+            10.0,
+            96.0,
             20.0,
             LIGHTGRAY,
         );

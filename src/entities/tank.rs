@@ -3,37 +3,9 @@ use crate::input::KeyBindings;
 use crate::map::GameMap;
 use crate::entities::bullet::Bullet;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-impl Direction {
-    pub fn vector(self) -> IVec2 {
-        match self {
-            Direction::Up    => ivec2( 0, -1),
-            Direction::Down  => ivec2( 0,  1),
-            Direction::Left  => ivec2(-1,  0),
-            Direction::Right => ivec2( 1,  0),
-        }
-    }
-
-    pub fn all() -> [Direction; 4] {
-        [Direction::Up, Direction::Down, Direction::Left, Direction::Right]
-    }
-
-    pub fn opposite(self) -> Direction {
-        match self {
-            Direction::Up    => Direction::Down,
-            Direction::Down  => Direction::Up,
-            Direction::Left  => Direction::Right,
-            Direction::Right => Direction::Left,
-        }
-    }
-}
+// Реэкспорт Direction, чтобы старые импорты
+// `crate::entities::tank::Direction` продолжали работать.
+pub use crate::entities::direction::Direction;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Team {
@@ -53,9 +25,12 @@ pub struct Tank {
     pub team: Team,
     pub alive: bool,
     pub invulnerable: bool,
-    /// Бонусный враг (каждый 4-й). Мигает фиолетовым.
-    /// При убийстве в будущем будет спавнить бонус.
     pub is_bonus: bool,
+    /// Ранг танка (для игрока).
+    /// Управляет max_active_bullets, pierces_steel, bullet_speed_multiplier.
+    pub rank: u8,
+    /// Множитель скорости пули. 1.0 — базовая, 1.5 — на ранге 1+.
+    pub bullet_speed_multiplier: f32,
     // --- ИИ ---
     pub ai_dir_timer: f32,
     pub ai_shoot_timer: f32,
@@ -75,6 +50,8 @@ impl Tank {
             alive: true,
             invulnerable: false,
             is_bonus: false,
+            rank: 0,
+            bullet_speed_multiplier: 1.0,
             ai_dir_timer: 0.0,
             ai_shoot_timer: 0.0,
         }
@@ -95,6 +72,39 @@ impl Tank {
         t.ai_dir_timer = 0.0;
         t.ai_shoot_timer = 1.0;
         t
+    }
+
+    /// Устанавливает ранг и пересчитывает характеристики.
+    /// Таблица (классика + задел):
+    ///   0 — базовая скорость пули, 1 пуля, без пробоя
+    ///   1 — +50% скорость пули
+    ///   2 — +50% скорость пули, 2 пули
+    ///   3 — +50% скорость пули, 2 пули, пробитие стали
+    ///   >3 — как 3
+    pub fn apply_rank(&mut self, rank: u8) {
+        self.rank = rank;
+        match rank {
+            0 => {
+                self.max_active_bullets = 1;
+                self.pierces_steel = false;
+                self.bullet_speed_multiplier = 1.0;
+            }
+            1 => {
+                self.max_active_bullets = 1;
+                self.pierces_steel = false;
+                self.bullet_speed_multiplier = 1.5;
+            }
+            2 => {
+                self.max_active_bullets = 2;
+                self.pierces_steel = false;
+                self.bullet_speed_multiplier = 1.5;
+            }
+            _ => {
+                self.max_active_bullets = 2;
+                self.pierces_steel = true;
+                self.bullet_speed_multiplier = 1.5;
+            }
+        }
     }
 
     pub fn take_hit(&mut self) {
@@ -371,10 +381,11 @@ impl Tank {
         }
 
         let pos = spawn - vec2(bullet_size / 2.0, bullet_size / 2.0);
+        let actual_speed = bullet_speed * self.bullet_speed_multiplier;
         let mut bullet = Bullet::new(
             pos,
             self.direction,
-            bullet_speed,
+            actual_speed,
             bullet_size,
             self.id,
             self.team,
@@ -392,36 +403,5 @@ impl Tank {
         let tx = (p.x / tile_size).floor() as i32;
         let ty = (p.y / tile_size).floor() as i32;
         !map.is_blocked_for_bullet(tx, ty)
-    }
-
-    pub fn draw(&self) {
-        if !self.alive { return; }
-
-        // Мигание при неуязвимости.
-        if self.invulnerable {
-            let phase = ((get_time() * 10.0) as i32) % 2;
-            if phase != 0 { return; }
-        }
-
-        // Цвет: обычный враг — красный, бонусный — мигает фиолетовым/красным.
-        let color = match self.team {
-            Team::Player => GREEN,
-            Team::Enemy => {
-                if self.is_bonus {
-                    let phase = ((get_time() * 5.0) as i32) % 2;
-                    if phase == 0 { PURPLE } else { RED }
-                } else {
-                    RED
-                }
-            }
-        };
-
-        draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, color);
-        draw_rectangle_lines(self.pos.x, self.pos.y, self.size, self.size, 4.0, WHITE);
-
-        let center = self.pos + vec2(self.size / 2.0, self.size / 2.0);
-        let v = self.direction.vector();
-        let tip = center + vec2(v.x as f32, v.y as f32) * (self.size / 2.0);
-        draw_line(center.x, center.y, tip.x, tip.y, self.size * 0.2, WHITE);
     }
 }

@@ -9,14 +9,6 @@ pub enum Tile {
     Eagle,
 }
 
-/// Точки спавна врагов (в тайловых координатах). Экспортируются, чтобы
-/// спавнер и генератор бонусов использовали одни и те же.
-pub const ENEMY_SPAWN_POINTS: [IVec2; 3] = [
-    ivec2(0, 0),
-    ivec2(5, 0),
-    ivec2(11, 0),
-];
-
 pub struct GameMap {
     pub tiles: Vec<Tile>,
     pub width: i32,
@@ -38,6 +30,13 @@ impl GameMap {
         for x in 3..5 {
             for y in 8..10 {
                 tiles[(x + y * width) as usize] = Tile::Water;
+            }
+        }
+
+        // Тестовые стальные блоки (для проверки пробоя на 3-м ранге).
+        for x in 8..10 {
+            for y in 2..4 {
+                tiles[(x + y * width) as usize] = Tile::Steel;
             }
         }
 
@@ -135,12 +134,7 @@ impl GameMap {
         self.base_destroyed = true;
     }
 
-    /// Пытается найти случайный тайл, где можно заспавнить бонус.
-    /// Тайл должен быть Empty и не входить в список запрещённых.
-    /// Делает N попыток; если не нашёл — возвращает None.
     pub fn random_bonus_spawn(&self, forbidden: &[IVec2]) -> Option<IVec2> {
-        // Собираем все свободные тайлы один раз — быстрее и надёжнее,
-        // чем перебирать случайные координаты и надеяться.
         let mut candidates: Vec<IVec2> = Vec::new();
         for y in 0..self.height {
             for x in 0..self.width {

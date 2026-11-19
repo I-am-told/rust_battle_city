@@ -22,21 +22,33 @@ impl BonusKind {
 
     pub fn symbol(self) -> &'static str {
         match self {
-            BonusKind::Star    => "S",
-            BonusKind::Life    => "L",
+            BonusKind::Star    => "*",
+            BonusKind::Life    => "+",
             BonusKind::Grenade => "G",
             BonusKind::Timer   => "T",
             BonusKind::Shovel  => "Sh",
         }
     }
 
-    pub fn color(self) -> Color {
+    /// Яркая рамка (акцент).
+    pub fn accent_color(self) -> Color {
         match self {
             BonusKind::Star    => YELLOW,
             BonusKind::Life    => GREEN,
             BonusKind::Grenade => RED,
             BonusKind::Timer   => SKYBLUE,
             BonusKind::Shovel  => ORANGE,
+        }
+    }
+
+    /// Тёмный фон (для контраста).
+    pub fn background_color(self) -> Color {
+        match self {
+            BonusKind::Star    => Color::new(0.25, 0.20, 0.00, 1.0),
+            BonusKind::Life    => Color::new(0.00, 0.20, 0.00, 1.0),
+            BonusKind::Grenade => Color::new(0.25, 0.00, 0.00, 1.0),
+            BonusKind::Timer   => Color::new(0.00, 0.10, 0.25, 1.0),
+            BonusKind::Shovel  => Color::new(0.25, 0.12, 0.00, 1.0),
         }
     }
 }
@@ -68,9 +80,6 @@ impl Bonus {
         }
     }
 
-    /// Проверяет, пересекается ли бонус с танком, стоящим в `tank_pos`
-    /// с размером `tank_size`. При пересечении бонус помечается подобранным.
-    /// Возвращает true, если подобрали.
     pub fn try_pickup(&mut self, tank_pos: Vec2, tank_size: f32) -> bool {
         if !self.alive { return false; }
         if tank_pos.x < self.pos.x + self.size
@@ -88,15 +97,28 @@ impl Bonus {
     pub fn draw(&self) {
         if !self.alive { return; }
 
-        let phase = ((get_time() * 5.0) as i32) % 2;
+        // Мигание: 3 раза в секунду, "видимая" фаза длиннее, чтобы символ читался.
+        let phase = ((get_time() * 3.0) as i32) % 2;
         if phase != 0 { return; }
 
-        let c = self.kind.color();
-        draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, c);
-        draw_rectangle_lines(self.pos.x, self.pos.y, self.size, self.size, 2.0, WHITE);
+        let bg = self.kind.background_color();
+        let accent = self.kind.accent_color();
 
+        // Фон.
+        draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, bg);
+        // Толстая яркая рамка.
+        draw_rectangle_lines(
+            self.pos.x + 1.0,
+            self.pos.y + 1.0,
+            self.size - 2.0,
+            self.size - 2.0,
+            3.0,
+            accent,
+        );
+
+        // Символ по центру, крупный и белый.
         let text = self.kind.symbol();
-        let font_size = (self.size * 0.6) as u16;
+        let font_size = (self.size * 0.7) as u16;
         let dims = measure_text(text, None, font_size, 1.0);
         let tx = self.pos.x + self.size / 2.0 - dims.width / 2.0;
         let ty = self.pos.y + self.size / 2.0 + dims.height / 2.0;
