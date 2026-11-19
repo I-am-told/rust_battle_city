@@ -94,7 +94,16 @@ impl Tank {
         ivec2(tx, ty)
     }
 
+    /// Свободна ли (в терминах тайлов) позиция, если танк стоит от `origin` (2×2).
+    /// Включает проверку выхода за границы поля.
     fn is_clear_at_grid(&self, origin: IVec2, map: &GameMap) -> bool {
+        // Границы поля — жёсткая стена.
+        if origin.x < 0 || origin.y < 0 {
+            return false;
+        }
+        if origin.x + 2 > map.width || origin.y + 2 > map.height {
+            return false;
+        }
         for dy in 0..2 {
             for dx in 0..2 {
                 if map.is_blocked_for_tank(origin.x + dx, origin.y + dy) {
@@ -105,7 +114,19 @@ impl Tank {
         true
     }
 
+    /// Свободна ли (в пикселях) позиция `pos`. Включает проверку границ поля.
     fn is_clear_at_px(&self, pos: Vec2, map: &GameMap, tile_size: f32) -> bool {
+        let playfield_w = map.width as f32 * tile_size;
+        let playfield_h = map.height as f32 * tile_size;
+
+        // Границы поля.
+        if pos.x < 0.0 || pos.y < 0.0 {
+            return false;
+        }
+        if pos.x + self.size > playfield_w || pos.y + self.size > playfield_h {
+            return false;
+        }
+
         let epsilon = 0.001;
         let left   = (pos.x / tile_size).floor() as i32;
         let right  = ((pos.x + self.size - epsilon) / tile_size).floor() as i32;
@@ -148,14 +169,6 @@ impl Tank {
         self.move_along(self.direction, dist, map, tile_size);
     }
 
-    /// Простой ИИ врага. Порядок действий:
-    /// 1) если таймер направления истёк — попробовать сменить направление;
-    /// 2) поехать в текущем направлении;
-    /// 3) если упёрлись — принудительно сменить направление (в следующем кадре поедем уже в новом);
-    /// 4) если таймер стрельбы истёк — выстрелить.
-    ///
-    /// `choose_new_direction` больше НЕ вызывает snap_to_grid сам по себе —
-    /// это устраняет «поддёргивание назад» при выборе того же направления.
     pub fn update_ai(
         &mut self,
         dt: f32,
@@ -171,25 +184,21 @@ impl Tank {
 
         self.ai_dir_timer -= dt;
 
-        // 1) Пора пересмотреть направление?
         if self.ai_dir_timer <= 0.0 {
             self.choose_new_direction(map, tile_size);
-            self.ai_dir_timer = 1.0 + rand::gen_range(0.0, 1.5);
+            self.ai_dir_timer = 2.0 + rand::gen_range(0.0, 2.0);
         }
 
-        // 2) Двигаемся в текущем направлении.
         let before = self.pos;
         let dist = self.speed * dt;
         self.move_along(self.direction, dist, map, tile_size);
         let moved = (self.pos - before).length_squared() > 0.01;
 
-        // 3) Упёрлись — принудительно меняем направление, в этом кадре уже не двигаемся.
         if !moved {
             self.choose_new_direction(map, tile_size);
-            self.ai_dir_timer = 1.0 + rand::gen_range(0.0, 1.5);
+            self.ai_dir_timer = 2.0 + rand::gen_range(0.0, 2.0);
         }
 
-        // 4) Стрельба.
         self.ai_shoot_timer -= dt;
         if self.ai_shoot_timer <= 0.0 {
             self.ai_shoot_timer = 1.5 + rand::gen_range(0.0, 1.5);
@@ -199,15 +208,9 @@ impl Tank {
         None
     }
 
-    /// Выбирает новое направление из свободных.
-    /// НЕ вызывает snap_to_grid и НЕ трогает self.pos.
-    /// Если текущее направление свободно — с некоторой вероятностью оставляет его же
-    /// (но не вынужденно, чтобы не было дёрганья — просто ничего не меняем).
-    /// Если упёрлись — гарантированно выбирает ДРУГОЕ направление.
     fn choose_new_direction(&mut self, map: &GameMap, tile_size: f32) {
         let origin = self.tile_origin(tile_size);
 
-        // Собираем свободные направления, ИСКЛЮЧАЯ текущее.
         let mut alternatives: Vec<Direction> = Vec::new();
         for d in Direction::all() {
             if d == self.direction {
@@ -219,21 +222,16 @@ impl Tank {
         }
 
         if alternatives.is_empty() {
-            // Не можем уехать никуда, кроме как остаться или развернуться.
-            // Пробуем развернуться, если свободно.
             let back = self.direction.opposite();
             if self.is_clear_at_grid(origin + back.vector(), map) {
                 self.direction = back;
             }
-            // Иначе — стоим, ничего не меняем.
             return;
         }
 
         let idx = rand::gen_range(0, alternatives.len());
         let new_dir = alternatives[idx];
 
-        // Меняем направление. Snap делаем ТОЛЬКО если реально меняем,
-        // и только если позиция не на сетке (иначе нечего снапить).
         if new_dir != self.direction {
             let on_grid = (self.pos.x / tile_size).fract().abs() < 0.001
                 && (self.pos.y / tile_size).fract().abs() < 0.001;
@@ -328,7 +326,14 @@ impl Tank {
         Some(bullet)
     }
 
+    /// Свободна ли точка `p` для спавна пули.
+    /// Вода не мешает, границы поля — мешают.
     fn is_bullet_point_free(&self, p: Vec2, map: &GameMap, tile_size: f32) -> bool {
+        let playfield_w = map.width as f32 * tile_size;
+        let playfield_h = map.height as f32 * tile_size;
+        if p.x < 0.0 || p.y < 0.0 || p.x >= playfield_w || p.y >= playfield_h {
+            return false;
+        }
         let tx = (p.x / tile_size).floor() as i32;
         let ty = (p.y / tile_size).floor() as i32;
         !map.is_blocked_for_bullet(tx, ty)

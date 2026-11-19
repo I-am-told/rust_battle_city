@@ -9,6 +9,7 @@ use input::KeyBindings;
 use map::GameMap;
 use entities::tank::{Tank, Direction};
 use entities::bullet::Bullet;
+use entities::spawner::EnemySpawner;
 
 #[macroquad::main("Battle City (Rust)")]
 async fn main() {
@@ -32,15 +33,8 @@ async fn main() {
     );
     player.id = 0;
 
-    // Один враг сверху для теста.
     let mut enemies: Vec<Tank> = Vec::new();
-    enemies.push(Tank::new_enemy(
-        vec2(1.0 * cfg.tile_size, 1.0 * cfg.tile_size),
-        Direction::Down,
-        tank_size,
-        cfg.tank_speed * 0.75,
-        1,
-    ));
+    let mut spawner = EnemySpawner::new(10, 3, cfg.grid_width);
 
     let mut bullets: Vec<Bullet> = Vec::new();
 
@@ -72,6 +66,7 @@ async fn main() {
 
         // --- Враги ---
         for enemy in enemies.iter_mut() {
+            if !enemy.alive { continue; }
             let active = bullets
                 .iter()
                 .filter(|b| b.alive && b.owner_id == enemy.id)
@@ -88,6 +83,22 @@ async fn main() {
                 bullets.push(bullet);
             }
         }
+
+        // --- Спавн врагов ---
+        let alive_enemies = enemies.iter().filter(|e| e.alive).count();
+        if let Some(new_enemy) = spawner.update(
+            dt,
+            alive_enemies,
+            &enemies,
+            cfg.tile_size,
+            tank_size,
+            cfg.tank_speed * 0.75,
+        ) {
+            enemies.push(new_enemy);
+        }
+
+        // Убираем мёртвых, чтобы вектор не пух.
+        enemies.retain(|e| e.alive);
 
         // --- Пули ---
         for b in bullets.iter_mut() {

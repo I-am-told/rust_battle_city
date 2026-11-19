@@ -9,8 +9,6 @@ pub struct Bullet {
     pub size: f32,
     pub owner_id: u32,
     pub alive: bool,
-    /// Пробивает ли эта пуля сталь. По умолчанию false.
-    /// Включается на 4-м ранге (заложено на будущее).
     pub pierces_steel: bool,
 }
 
@@ -40,7 +38,11 @@ impl Bullet {
 
         for _ in 0..steps {
             let next = self.pos + sub_step;
-            if self.collides_at(next, map, tile_size) {
+            if self.out_of_bounds(next, map, tile_size) {
+                self.alive = false;
+                return;
+            }
+            if self.collides_tile(next, map, tile_size) {
                 self.damage_hit_tile(next, map, tile_size);
                 self.alive = false;
                 return;
@@ -49,7 +51,16 @@ impl Bullet {
         }
     }
 
-    fn collides_at(&self, pos: Vec2, map: &GameMap, tile_size: f32) -> bool {
+    fn out_of_bounds(&self, pos: Vec2, map: &GameMap, tile_size: f32) -> bool {
+        let playfield_w = map.width as f32 * tile_size;
+        let playfield_h = map.height as f32 * tile_size;
+        pos.x < 0.0
+            || pos.y < 0.0
+            || pos.x + self.size > playfield_w
+            || pos.y + self.size > playfield_h
+    }
+
+    fn collides_tile(&self, pos: Vec2, map: &GameMap, tile_size: f32) -> bool {
         let epsilon = 0.001;
         let left   = (pos.x / tile_size).floor() as i32;
         let right  = ((pos.x + self.size - epsilon) / tile_size).floor() as i32;
