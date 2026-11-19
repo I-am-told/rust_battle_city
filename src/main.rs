@@ -29,16 +29,21 @@ async fn main() {
     let keys_p1: KeyBindings = (&cfg.player1_keys).into();
     let mut map = GameMap::new(cfg.grid_width, cfg.grid_height);
 
-    // Позиция спавна игрока 1: слева от базы, с зазором 1 тайл от кирпичей
-    // и 1 тайл от нижней границы поля. Вычисляется от base_origin.
-    // (Игрок 2 будет справа — x = base.x + 3 — когда появится.)
+    // Спавн игрока 1: слева от базы, с зазором 1 тайл от кирпичей
+    // (base.x - 1) и 1 тайл от нижней границы поля.
+    // Танк занимает 2 тайла по X: x .. x+1. Кирпич на base.x - 1.
+    // Чтобы был зазор в 1 тайл: x + 1 = base.x - 2 → x = base.x - 3.
+    // НО нам нужен ЗАЗОР: x + 1 < base.x - 1 → x < base.x - 2 → x = base.x - 3.
+    // Проверим: base.x = 5 → x = 2, танк 2,3. Кирпич 4. Зазор — тайл 3? Нет!
+    // Танк занимает тайлы 2 и 3. Кирпич на 4. Между 3 и 4 — нет зазора.
+    // Нужно x = base.x - 4 → танк 1,2. Кирпич 4. Зазор — тайл 3. ✅
     let player_spawn = {
         if let Some(base) = map.base_origin {
-            let sx = ((base.x - 3).max(0)) as f32 * cfg.tile_size;
+            let sx = ((base.x - 4).max(0)) as f32 * cfg.tile_size;
             let sy = ((base.y - 1).max(0)) as f32 * cfg.tile_size;
             vec2(sx, sy)
         } else {
-            vec2(2.0 * cfg.tile_size, (cfg.grid_height - 3) as f32 * cfg.tile_size)
+            vec2(1.0 * cfg.tile_size, (cfg.grid_height - 3) as f32 * cfg.tile_size)
         }
     };
 
@@ -68,7 +73,6 @@ async fn main() {
         if is_key_pressed(KeyCode::Escape) { break; }
 
         if state == GameState::Playing {
-            // --- Таймер неуязвимости ---
             if invuln_timer > 0.0 {
                 invuln_timer -= dt;
                 if invuln_timer <= 0.0 {
@@ -76,7 +80,6 @@ async fn main() {
                 }
             }
 
-            // --- Таймер респавна ---
             if !player.alive {
                 if respawn_timer > 0.0 {
                     respawn_timer -= dt;
@@ -190,7 +193,6 @@ async fn main() {
             }
         }
 
-        // --- Отрисовка ---
         clear_background(BLACK);
 
         let cam = Camera2D {
@@ -235,7 +237,6 @@ async fn main() {
 
         set_default_camera();
 
-        // HUD: жизни и количество оставшихся врагов — в экранных координатах.
         draw_text(
             &format!("LIVES: {}", player_lives),
             10.0,

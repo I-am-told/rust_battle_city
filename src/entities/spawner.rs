@@ -2,21 +2,17 @@ use macroquad::prelude::*;
 use crate::entities::tank::{Tank, Direction};
 
 pub struct EnemySpawner {
-    /// Через сколько секунд после последнего спавна рожать следующего.
     pub spawn_interval: f32,
-    /// Сколько ждать при занятой точке спавна, прежде чем проверить снова.
     pub retry_interval: f32,
     timer: f32,
-    /// Индекс текущей точки спавна в очереди.
     next_point: usize,
     pub remaining_to_spawn: u32,
     /// Максимум врагов ОДНОВРЕМЕННО на поле.
-    /// ЗАДЕЛ НА БУДУЩЕЕ: в Battle City это зависит от уровня игры —
-    /// на высоких уровнях одновременно может быть больше врагов.
-    /// Сейчас задаётся при создании спавнера, позже будем менять при
-    /// переходе между уровнями.
+    /// ЗАДЕЛ НА БУДУЩЕЕ: зависит от уровня игры.
     pub max_on_field: u32,
     next_id: u32,
+    /// Сколько врагов уже заспавнено (для определения бонусных — каждый 4-й).
+    spawned_count: u32,
     spawn_points: Vec<IVec2>,
 }
 
@@ -30,13 +26,11 @@ impl EnemySpawner {
             remaining_to_spawn: total_enemies,
             max_on_field,
             next_id: 1,
+            spawned_count: 0,
             spawn_points: Self::compute_spawn_points(grid_width),
         }
     }
 
-    /// Три точки у верхнего края поля (y = 0):
-    /// левая (x = 0), центральная, правая (x = grid_width - 2).
-    /// Танк 2×2 тайла, поэтому координаты — левый верхний угол танка.
     fn compute_spawn_points(grid_width: i32) -> Vec<IVec2> {
         let left_x = 0;
         let right_x = (grid_width - 2).max(left_x);
@@ -50,9 +44,6 @@ impl EnemySpawner {
         ]
     }
 
-    /// `all_tanks` — ВСЕ танки на поле (враги И игрок), чтобы корректно
-    /// проверять занятость точки спавна. Раньше передавались только враги,
-    /// из-за чего враг мог заспавниться в игрока.
     pub fn update(
         &mut self,
         dt: f32,
@@ -74,17 +65,14 @@ impl EnemySpawner {
             return None;
         }
 
-        // Берём ТОЛЬКО текущую точку из очереди — без перебора других.
         let tile = self.spawn_points[self.next_point];
         let pos = vec2(tile.x as f32 * tile_size, tile.y as f32 * tile_size);
 
         if Self::point_occupied_by_tank(pos, tank_size, all_tanks) {
-            // Точка занята (врагом ИЛИ игроком) — откладываем, указатель НЕ двигаем.
             self.timer = self.retry_interval;
             return None;
         }
 
-        // Точка свободна — спавним.
         self.timer = self.spawn_interval;
         self.next_point = (self.next_point + 1) % self.spawn_points.len();
         self.remaining_to_spawn -= 1;
@@ -92,7 +80,19 @@ impl EnemySpawner {
         let id = self.next_id;
         self.next_id += 1;
 
-        Some(Tank::new_enemy(pos, Direction::Down, tank_size, tank_speed, id))
+        // Каждый 4-й заспавненный танк — бонусный (1-й обычный, 2-й, 3-й, 4-й бонусный, ...).
+        // spawned_count считает уже заспавненных, поэтому проверяем (spawned_count + 1) % 4 == 0.
+        self.spawned_count += 1;
+        let is_bonus = self.spawned_count % 4 == 0;
+
+        Some(Tank::new_enemy(
+            pos,
+            Direction::Down,
+            tank_size,
+            tank_speed,
+            id,
+            is_bonus,
+        ))
     }
 
     fn point_occupied_by_tank(pos: Vec2, tank_size: f32, tanks: &[Tank]) -> bool {

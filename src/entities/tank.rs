@@ -52,8 +52,10 @@ pub struct Tank {
     pub pierces_steel: bool,
     pub team: Team,
     pub alive: bool,
-    /// Неуязвимость (после респавна). Пока true — пули не бьют.
     pub invulnerable: bool,
+    /// Бонусный враг (каждый 4-й). Мигает фиолетовым.
+    /// При убийстве в будущем будет спавнить бонус.
+    pub is_bonus: bool,
     // --- ИИ ---
     pub ai_dir_timer: f32,
     pub ai_shoot_timer: f32,
@@ -72,6 +74,7 @@ impl Tank {
             team: Team::Player,
             alive: true,
             invulnerable: false,
+            is_bonus: false,
             ai_dir_timer: 0.0,
             ai_shoot_timer: 0.0,
         }
@@ -83,10 +86,12 @@ impl Tank {
         size: f32,
         speed: f32,
         id: u32,
+        is_bonus: bool,
     ) -> Self {
         let mut t = Self::new(pos, direction, size, speed);
         t.team = Team::Enemy;
         t.id = id;
+        t.is_bonus = is_bonus;
         t.ai_dir_timer = 0.0;
         t.ai_shoot_timer = 1.0;
         t
@@ -395,15 +400,22 @@ impl Tank {
         // Мигание при неуязвимости.
         if self.invulnerable {
             let phase = ((get_time() * 10.0) as i32) % 2;
-            if phase != 0 {
-                return;
-            }
+            if phase != 0 { return; }
         }
 
+        // Цвет: обычный враг — красный, бонусный — мигает фиолетовым/красным.
         let color = match self.team {
             Team::Player => GREEN,
-            Team::Enemy  => RED,
+            Team::Enemy => {
+                if self.is_bonus {
+                    let phase = ((get_time() * 5.0) as i32) % 2;
+                    if phase == 0 { PURPLE } else { RED }
+                } else {
+                    RED
+                }
+            }
         };
+
         draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, color);
         draw_rectangle_lines(self.pos.x, self.pos.y, self.size, self.size, 4.0, WHITE);
 
