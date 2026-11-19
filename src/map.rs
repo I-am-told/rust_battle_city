@@ -49,8 +49,35 @@ impl GameMap {
         self.tiles[(x + y * self.width) as usize]
     }
 
-    pub fn is_blocked(&self, x: i32, y: i32) -> bool {
+    /// Блокирует ли тайл движение танка.
+    pub fn is_blocked_for_tank(&self, x: i32, y: i32) -> bool {
         matches!(self.get_tile(x, y), Tile::Brick | Tile::Steel | Tile::Water)
+    }
+
+    /// Блокирует ли тайл полёт пули. Вода — прозрачна.
+    pub fn is_blocked_for_bullet(&self, x: i32, y: i32) -> bool {
+        matches!(self.get_tile(x, y), Tile::Brick | Tile::Steel)
+    }
+
+    /// Пытается повредить тайл в (x, y).
+    /// `pierce_steel` — если true, сталь тоже разрушается (4-й ранг).
+    /// Возвращает true, если тайл изменился.
+    pub fn damage_at(&mut self, x: i32, y: i32, pierce_steel: bool) -> bool {
+        if x < 0 || x >= self.width || y < 0 || y >= self.height {
+            return false;
+        }
+        let idx = (x + y * self.width) as usize;
+        match self.tiles[idx] {
+            Tile::Brick => {
+                self.tiles[idx] = Tile::Empty;
+                true
+            }
+            Tile::Steel if pierce_steel => {
+                self.tiles[idx] = Tile::Empty;
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn draw(&self, tile_size: f32) {

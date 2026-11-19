@@ -19,7 +19,7 @@ async fn main() {
     let tank_size = cfg.tile_size * 2.0;
 
     let keys_p1: KeyBindings = (&cfg.player1_keys).into();
-    let map = GameMap::new(cfg.grid_width, cfg.grid_height);
+    let mut map = GameMap::new(cfg.grid_width, cfg.grid_height);
 
     let start_x = 5.0 * cfg.tile_size;
     let start_y = 10.0 * cfg.tile_size;
@@ -62,7 +62,7 @@ async fn main() {
 
         // --- Обновление пуль ---
         for b in bullets.iter_mut() {
-            b.update(dt, &map, cfg.tile_size);
+            b.update(dt, &mut map, cfg.tile_size);
         }
         bullets.retain(|b| b.alive);
 

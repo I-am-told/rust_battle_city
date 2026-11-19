@@ -28,10 +28,12 @@ pub struct Tank {
     pub size: f32,
     pub speed: f32,
     /// Сколько пуль танк может держать в воздухе одновременно.
-    /// Пока 1. С ростом ранга будем увеличивать (2, 3, ...).
     pub max_active_bullets: u8,
-    /// Уникальный идентификатор танка (0 — игрок; врагам дадим 1, 2, ...).
+    /// Уникальный идентификатор танка.
     pub id: u32,
+    /// Пробивает ли пуля этого танка сталь.
+    /// Выставляется в true на 4-м ранге (заложено на будущее).
+    pub pierces_steel: bool,
 }
 
 impl Tank {
@@ -43,6 +45,7 @@ impl Tank {
             speed,
             max_active_bullets: 1,
             id: 0,
+            pierces_steel: false,
         }
     }
 
@@ -55,7 +58,7 @@ impl Tank {
     fn is_clear_at_grid(&self, origin: IVec2, map: &GameMap) -> bool {
         for dy in 0..2 {
             for dx in 0..2 {
-                if map.is_blocked(origin.x + dx, origin.y + dy) {
+                if map.is_blocked_for_tank(origin.x + dx, origin.y + dy) {
                     return false;
                 }
             }
@@ -72,7 +75,7 @@ impl Tank {
 
         for ty in top..=bottom {
             for tx in left..=right {
-                if map.is_blocked(tx, ty) {
+                if map.is_blocked_for_tank(tx, ty) {
                     return false;
                 }
             }
@@ -159,9 +162,11 @@ impl Tank {
     }
 
     /// Пробует выстрелить. Возвращает `Some(Bullet)`, если выстрел удался.
-    /// `active_bullets` — сколько пуль этого танка сейчас в воздухе.
-    /// Если `active_bullets >= max_active_bullets` — не стреляем.
-    /// Если дуло упирается в стену — не стреляем (чтобы пуля не спавнилась в блоке).
+    ///
+    /// В отличие от предыдущей версии, выстрел НЕ отменяется, если дуло упирается
+    /// в стену. Вместо этого пуля спавнится как можно ближе к дулу, но в свободном
+    /// тайле (сдвигаем точку спавна от дула к центру танка, пока не найдём свободное
+    /// место). Так танк стреляет всегда, а пуля сразу врезается в стену и рушит её.
     pub fn try_fire(
         &self,
         active_bullets: u8,
@@ -178,20 +183,38 @@ impl Tank {
         let dir_vec_f = vec2(dir_vec.x as f32, dir_vec.y as f32);
         let center = self.pos + vec2(self.size / 2.0, self.size / 2.0);
 
-        // Точка появления пули — чуть впереди дула.
+        // Идеальная точка спавна — чуть впереди дула.
         let muzzle = center + dir_vec_f * (self.size / 2.0 + 1.0);
 
-        // Если дуло в стене — не стреляем.
-        let mtx = (muzzle.x / tile_size).floor() as i32;
-        let mty = (muzzle.y / tile_size).floor() as i32;
-        if map.is_blocked(mtx, mty) {
-            return None;
+        // Если там стена — сдвигаем точку к центру танка, пока не окажемся
+        // в свободном тайле. Шаг 0.5 px.
+        let mut spawn = muzzle;
+        let step_back = 0.5;
+        let mut dist_back = 0.0;
+        let max_back = (self.size / 2.0) + 2.0;
+
+        while !self.is_bullet_point_free(spawn, map, tile_size) {
+            dist_back += step_back;
+            if dist_back > max_back {
+                // Даже центр танка в стене — не стреляем (защита от багов).
+                return None;
+            }
+            spawn = muzzle - dir_vec_f * dist_back;
         }
 
-        // Позиция верхнего левого угла пули, чтобы её центр был в muzzle.
-        let pos = muzzle - vec2(bullet_size / 2.0, bullet_size / 2.0);
+        // Позиция верхнего левого угла пули, чтобы её центр был в spawn.
+        let pos = spawn - vec2(bullet_size / 2.0, bullet_size / 2.0);
 
-        Some(Bullet::new(pos, self.direction, bullet_speed, bullet_size, self.id))
+        let mut bullet = Bullet::new(pos, self.direction, bullet_speed, bullet_size, self.id);
+        bullet.pierces_steel = self.pierces_steel;
+        Some(bullet)
+    }
+
+    /// Свободна ли точка `p` с точки зрения полёта пули (вода не мешает).
+    fn is_bullet_point_free(&self, p: Vec2, map: &GameMap, tile_size: f32) -> bool {
+        let tx = (p.x / tile_size).floor() as i32;
+        let ty = (p.y / tile_size).floor() as i32;
+        !map.is_blocked_for_bullet(tx, ty)
     }
 
     pub fn draw(&self) {
