@@ -108,6 +108,10 @@ pub struct Config {
     pub bullet_size: f32,
     /// Помощь при повороте: "off" | "jump" | "smooth".
     pub turn_assist: String,
+    /// Громкость звука 0.0..1.0 (0 — без звука).
+    pub sound_volume: f32,
+    /// Гул мотора, пока танк игрока едет.
+    pub engine_sound: bool,
     pub player1_keys: PlayerKeys,
     pub player2_keys: PlayerKeys,
     pub system_keys: SystemKeys,
@@ -124,6 +128,8 @@ impl Default for Config {
             bullet_speed: 10.0,
             bullet_size: 0.2,
             turn_assist: "smooth".into(),
+            sound_volume: 0.6,
+            engine_sound: true,
             player1_keys: PlayerKeys::player1_default(),
             player2_keys: PlayerKeys::player2_default(),
             system_keys: SystemKeys::default(),

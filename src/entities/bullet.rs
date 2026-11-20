@@ -1,5 +1,16 @@
 use macroquad::prelude::*;
-use crate::map::GameMap;
+use crate::map::{GameMap, WallHit};
+
+/// Чем закончился полёт пули (для звука).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum BulletHit {
+    /// Край поля.
+    Edge,
+    Tank,
+    Wall(WallHit),
+    /// Встречная пуля.
+    Bullet,
+}
 use crate::entities::tank::{Direction, Tank, Team};
 
 pub struct Bullet {
@@ -11,6 +22,8 @@ pub struct Bullet {
     pub owner_team: Team,
     pub alive: bool,
     pub pierces_steel: bool,
+    /// Во что попала (когда alive стал false).
+    pub hit: Option<BulletHit>,
 }
 
 impl Bullet {
@@ -31,6 +44,7 @@ impl Bullet {
             owner_team,
             alive: true,
             pierces_steel: false,
+            hit: None,
         }
     }
 
@@ -56,17 +70,20 @@ impl Bullet {
 
             if self.out_of_bounds(next, map, tile_size) {
                 self.alive = false;
+                self.hit = Some(BulletHit::Edge);
                 return None;
             }
 
             if let Some(hit_id) = self.hits_tank(next, tanks) {
                 self.alive = false;
+                self.hit = Some(BulletHit::Tank);
                 return Some(hit_id);
             }
 
             if self.collides_tile(next, map, tile_size) {
-                self.damage_hit_tile(next, map, tile_size);
+                let w = self.damage_hit_tile(next, map, tile_size);
                 self.alive = false;
+                self.hit = Some(BulletHit::Wall(w));
                 return None;
             }
 
@@ -106,8 +123,8 @@ impl Bullet {
         map.rect_blocked(pos, vec2(self.size, self.size), tile_size, true)
     }
 
-    fn damage_hit_tile(&self, pos: Vec2, map: &mut GameMap, tile_size: f32) {
-        map.bullet_hit(pos, self.size, self.direction.vector(), tile_size, self.pierces_steel);
+    fn damage_hit_tile(&self, pos: Vec2, map: &mut GameMap, tile_size: f32) -> WallHit {
+        map.bullet_hit(pos, self.size, self.direction.vector(), tile_size, self.pierces_steel)
     }
 
     pub fn resolve_mutual_destruction(bullets: &mut [Bullet]) {
@@ -121,6 +138,8 @@ impl Bullet {
                 if Self::aabb_overlap(&bullets[i], &bullets[j]) {
                     bullets[i].alive = false;
                     bullets[j].alive = false;
+                    bullets[i].hit = Some(BulletHit::Bullet);
+                    bullets[j].hit = Some(BulletHit::Bullet);
                     break;
                 }
             }

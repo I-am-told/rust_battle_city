@@ -3,8 +3,10 @@ use crate::ui_text::{draw_text, measure_text};
 use crate::config::Config;
 use crate::input::KeyBindings;
 use crate::map::GameMap;
-use crate::entities::tank::{Tank, Direction, TurnAssist};
-use crate::entities::bullet::Bullet;
+use crate::entities::tank::{Tank, Direction, Team, TurnAssist};
+use crate::entities::bullet::{Bullet, BulletHit};
+use crate::map::WallHit;
+use crate::sound::Sfx;
 use crate::entities::spawner::EnemySpawner;
 use crate::entities::bonus::Bonus;
 use crate::entities::effects::{draw_spawn_star, Effect, EffectKind, SPAWN_STAR_TIME};
@@ -55,6 +57,8 @@ pub struct Game {
     pub bonuses: Vec<Bonus>,
     /// Взрывы.
     pub effects: Vec<Effect>,
+    /// Звуковые события за кадр (main забирает и проигрывает).
+    pub sfx: Vec<Sfx>,
     /// Взрыв штаба уже показан.
     base_exploded: bool,
 
@@ -176,6 +180,7 @@ impl Game {
             bullets: Vec::new(),
             bonuses: Vec::new(),
             effects: Vec::new(),
+            sfx: vec![Sfx::LevelStart],
             base_exploded: false,
             freeze_timer: 0.0,
             shovel_timer: 0.0,
@@ -209,14 +214,27 @@ impl Game {
     pub fn toggle_pause(&mut self) {
         if self.state == GameState::Playing {
             self.paused = !self.paused;
+            if self.paused {
+                self.sfx.push(Sfx::Pause);
+            }
         }
     }
 
     /// Поставить на паузу (не снимает её). Работает только во время игры.
     pub fn pause(&mut self) {
-        if self.state == GameState::Playing {
+        if self.state == GameState::Playing && !self.paused {
             self.paused = true;
+            self.sfx.push(Sfx::Pause);
         }
+    }
+
+    /// Едет ли сейчас хоть один игрок (для гула мотора).
+    pub fn player_moving(&self) -> bool {
+        self.state == GameState::Playing
+            && !self.paused
+            && self.players.iter().any(|p| {
+                p.tank.alive && (p.tank.pos - p.tank.prev_pos).length_squared() > 0.0001
+            })
     }
 
     /// Занята ли точка появления игрока `idx` живым танком (врагом или напарником).
@@ -331,6 +349,7 @@ impl Game {
                     self.bullet_size,
                 ) {
                     self.bullets.push(bullet);
+                    self.sfx.push(Sfx::Shot);
                 }
             }
         }
@@ -396,6 +415,14 @@ impl Game {
         for p in pops {
             self.explode(p, EffectKind::Small);
         }
+        // Звук попаданий — только для пуль игроков (как в оригинале).
+        for b in self.bullets.iter().filter(|b| !b.alive && b.owner_team == Team::Player) {
+            match b.hit {
+                Some(BulletHit::Wall(WallHit::Brick)) => self.sfx.push(Sfx::HitBrick),
+                Some(BulletHit::Wall(WallHit::Steel)) | Some(BulletHit::Edge) => self.sfx.push(Sfx::HitSteel),
+                _ => {}
+            }
+        }
         self.bullets.retain(|b| b.alive);
 
         if self.map.base_destroyed && !self.base_exploded {
@@ -404,6 +431,7 @@ impl Game {
                 let c = vec2(b.x as f32 + 1.0, b.y as f32 + 1.0) * self.tile_size;
                 self.explode(c, EffectKind::Big);
             }
+            self.sfx.push(Sfx::BaseBoom);
         }
 
         let mut pending_bonuses: u32 = 0;
@@ -414,10 +442,14 @@ impl Game {
                 if p.hit() {
                     let c = p.tank.pos + vec2(p.tank.size, p.tank.size) / 2.0;
                     self.effects.push(Effect::new(c, EffectKind::Big, self.tank_size));
+                    self.sfx.push(Sfx::PlayerBoom);
                 }
             } else if let Some(e) = self.enemies.iter_mut().find(|e| e.id == id) {
                 let was_bonus = e.is_bonus;
                 e.take_hit();
+                if e.alive {
+                    self.sfx.push(Sfx::HitArmor);
+                }
                 if !e.alive && was_bonus {
                     pending_bonuses += 1;
                 }
@@ -435,6 +467,7 @@ impl Game {
                         tile.y as f32 * self.tile_size,
                     );
                     self.bonuses.push(Bonus::new(pos, self.tank_size, BONUS_LIFETIME));
+                    self.sfx.push(Sfx::BonusAppear);
                     forbidden.push(tile);
                 }
             }
@@ -450,6 +483,7 @@ impl Game {
             .collect();
         for c in booms {
             self.explode(c, EffectKind::Big);
+            self.sfx.push(Sfx::EnemyBoom);
         }
         self.enemies.retain(|e| e.alive);
 
@@ -466,6 +500,11 @@ impl Game {
                 }
                 if b.try_pickup(p.tank.pos, p.tank.size) {
                     self.picked_bonuses += 1;
+                    self.sfx.push(if b.kind == crate::entities::bonus::BonusKind::Life {
+                        Sfx::LifeUp
+                    } else {
+                        Sfx::BonusPickup
+                    });
                     apply_bonus(
                         b.kind,
                         p,
@@ -488,6 +527,7 @@ impl Game {
         let anyone_alive = self.players.iter().any(|p| p.in_game());
         if self.map.base_destroyed || (!anyone_alive && self.lives == 0) {
             self.state = GameState::Defeat;
+            self.sfx.push(Sfx::GameOver);
         } else if self.spawner.remaining_to_spawn == 0 && self.enemies.is_empty() && self.pending.is_empty() {
             // Враги кончились — игра идёт ещё VICTORY_DELAY секунд, потом победа.
             // Поражение в это время (штаб, последняя жизнь) всё ещё возможно —

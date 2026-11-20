@@ -7,6 +7,7 @@ mod menu;
 mod controls;
 mod ui_text;
 mod levels;
+mod sound;
 
 use macroquad::prelude::*;
 use crate::ui_text::{draw_text, measure_text};
@@ -63,6 +64,8 @@ async fn main() {
     let scale = if cfg.window_scale > 0.0 { cfg.window_scale } else { 1.0 };
     request_new_screen_size(frame.x * scale, frame.y * scale);
 
+    let mut audio = sound::Audio::load(cfg.sound_volume, cfg.engine_sound).await;
+
     let mut screen = Screen::Menu(Menu::new(0, &keys_path));
     // Последний выбор в меню (после GAME OVER курсор стоит на нём).
     let mut last_menu_choice: usize = 0;
@@ -106,6 +109,7 @@ async fn main() {
                     );
                     next = Some(Screen::Game(Box::new(Game::new(&cfg, keys, Rc::new(lv)))));
                 }
+                audio.set_engine(false);
                 menu.draw(&all_keys);
                 draw_quit_hint(false, &sys, quit_held);
             }
@@ -124,6 +128,16 @@ async fn main() {
                     }
                 }
                 game.update(dt);
+                // Звуки за кадр: одинаковые не дублируем (три взрыва
+                // в одном кадре — один звук, а не втрое громче).
+                let mut played: Vec<sound::Sfx> = Vec::new();
+                for s in game.sfx.drain(..) {
+                    if !played.contains(&s) {
+                        audio.play(s);
+                        played.push(s);
+                    }
+                }
+                audio.set_engine(game.player_moving());
                 game.draw();
                 draw_quit_hint(game.paused, &sys, quit_held);
             }

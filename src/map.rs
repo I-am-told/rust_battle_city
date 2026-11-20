@@ -9,6 +9,14 @@ pub enum Tile {
     Eagle,
 }
 
+/// Во что попала пуля (для звука).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum WallHit {
+    Brick,
+    Steel,
+    Base,
+}
+
 /// Все 4 четвертинки кирпичного тайла на месте.
 pub const BRICK_FULL: u8 = 0b1111;
 
@@ -182,7 +190,7 @@ impl GameMap {
     /// первый ряд, который она задела. Пуля «трёх звёзд» (`pierce`) бьёт
     /// на целый тайл в глубину и так же полосой разрушает сталь.
     /// Попадание в штаб — штаб уничтожен.
-    pub fn bullet_hit(&mut self, pos: Vec2, size: f32, dir: IVec2, tile_size: f32, pierce: bool) {
+    pub fn bullet_hit(&mut self, pos: Vec2, size: f32, dir: IVec2, tile_size: f32, pierce: bool) -> WallHit {
         let q = tile_size / 2.0;
         let (x0, x1, y0, y1) = Self::quarter_range(pos, vec2(size, size), tile_size);
 
@@ -191,7 +199,7 @@ impl GameMap {
             for qx in x0..=x1 {
                 if self.get_tile(qx.div_euclid(2), qy.div_euclid(2)) == Tile::Eagle {
                     self.destroy_base();
-                    return;
+                    return WallHit::Base;
                 }
             }
         }
@@ -202,8 +210,17 @@ impl GameMap {
             .filter(|c| self.quarter_solid(c.x, c.y, true))
             .collect();
         if solid.is_empty() {
-            return;
+            return WallHit::Steel;
         }
+        // Звук: если задет хоть один кирпич — «кирпич», иначе «сталь».
+        let kind = if solid
+            .iter()
+            .any(|c| self.get_tile(c.x.div_euclid(2), c.y.div_euclid(2)) == Tile::Brick)
+        {
+            WallHit::Brick
+        } else {
+            WallHit::Steel
+        };
         let vertical = dir.y != 0;
         let along = |c: &IVec2| if vertical { c.y } else { c.x };
         // Летим вверх/влево — первым задеваем ряд с большим индексом.
@@ -227,6 +244,7 @@ impl GameMap {
                 self.break_quarter(qx, qy, pierce);
             }
         }
+        kind
     }
 
     /// Разрушить четвертинку: кирпич — всегда, сталь — только `pierce`
