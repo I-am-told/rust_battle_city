@@ -21,24 +21,22 @@ impl GameMap {
     pub fn new(width: i32, height: i32) -> Self {
         let mut tiles = vec![Tile::Empty; (width * height) as usize];
 
-        for x in 5..8 {
-            for y in 4..6 {
-                tiles[(x + y * width) as usize] = Tile::Brick;
+        // Запись тайла с проверкой границ: тестовая раскладка рассчитана
+        // на 26x26, при другом размере поля лишнее просто отбрасывается.
+        let mut fill = |x0: i32, y0: i32, w: i32, h: i32, tile: Tile| {
+            for y in y0..y0 + h {
+                for x in x0..x0 + w {
+                    if x >= 0 && x < width && y >= 0 && y < height {
+                        tiles[(x + y * width) as usize] = tile;
+                    }
+                }
             }
-        }
+        };
 
-        for x in 3..5 {
-            for y in 8..10 {
-                tiles[(x + y * width) as usize] = Tile::Water;
-            }
-        }
-
-        // Тестовые стальные блоки.
-        for x in 8..10 {
-            for y in 2..4 {
-                tiles[(x + y * width) as usize] = Tile::Steel;
-            }
-        }
+        // Тестовая раскладка (координаты в тайлах, танк = 2x2).
+        fill(10, 8, 6, 4, Tile::Brick);
+        fill(6, 16, 4, 4, Tile::Water);
+        fill(16, 4, 4, 4, Tile::Steel);
 
         let base_x = (width - 2) / 2;
         let base_y = height - 2;
@@ -181,15 +179,21 @@ impl GameMap {
         }
     }
 
+    /// Случайное место для бонуса размером 2x2 тайла (как танк).
+    /// Все 4 тайла должны быть пустыми, а область не должна пересекаться
+    /// с областями 2x2 из `forbidden` (точки появления, другие бонусы).
     pub fn random_bonus_spawn(&self, forbidden: &[IVec2]) -> Option<IVec2> {
         let mut candidates: Vec<IVec2> = Vec::new();
-        for y in 0..self.height {
-            for x in 0..self.width {
-                if self.get_tile(x, y) != Tile::Empty {
+        for y in 0..(self.height - 1) {
+            for x in 0..(self.width - 1) {
+                let all_empty = (0..2).all(|dy| {
+                    (0..2).all(|dx| self.get_tile(x + dx, y + dy) == Tile::Empty)
+                });
+                if !all_empty {
                     continue;
                 }
                 let p = ivec2(x, y);
-                if forbidden.iter().any(|f| *f == p) {
+                if forbidden.iter().any(|f| (f.x - p.x).abs() < 2 && (f.y - p.y).abs() < 2) {
                     continue;
                 }
                 candidates.push(p);

@@ -70,6 +70,10 @@ impl Game {
         let keys_p1: KeyBindings = (&cfg.player1_keys).into();
         let map = GameMap::new(cfg.grid_width, cfg.grid_height);
         let tank_size = cfg.tile_size * 2.0;
+        // Скорости и размеры в конфиге — в тайлах; внутри игры — пиксели.
+        let tank_speed_px = cfg.tank_speed * cfg.tile_size;
+        let bullet_speed_px = cfg.bullet_speed * cfg.tile_size;
+        let bullet_size_px = cfg.bullet_size * cfg.tile_size;
 
         let player_spawn_tile = {
             if let Some(base) = map.base_origin {
@@ -89,7 +93,7 @@ impl Game {
             player_spawn,
             Direction::Up,
             tank_size,
-            cfg.tank_speed,
+            tank_speed_px,
         );
         player.id = 0;
         player.apply_rank(player_rank);
@@ -101,9 +105,9 @@ impl Game {
             tile_size: cfg.tile_size,
             tank_size,
             keys_p1,
-            bullet_speed: cfg.bullet_speed,
-            bullet_size: cfg.bullet_size,
-            tank_speed: cfg.tank_speed,
+            bullet_speed: bullet_speed_px,
+            bullet_size: bullet_size_px,
+            tank_speed: tank_speed_px,
             map,
             player,
             player_spawn,
@@ -303,7 +307,7 @@ impl Game {
                         tile.x as f32 * self.tile_size,
                         tile.y as f32 * self.tile_size,
                     );
-                    self.bonuses.push(Bonus::new(pos, self.tile_size, BONUS_LIFETIME));
+                    self.bonuses.push(Bonus::new(pos, self.tank_size, BONUS_LIFETIME));
                     forbidden.push(tile);
                 }
             }

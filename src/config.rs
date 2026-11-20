@@ -13,11 +13,19 @@ pub struct PlayerKeys {
 
 #[derive(Deserialize, Clone)]
 pub struct Config {
+    /// Размер тайла в пикселях — внутреннее разрешение отрисовки.
+    /// Танк = 2x2 тайла. На геймплей не влияет: скорости и размеры
+    /// ниже заданы в тайлах.
     pub tile_size: f32,
+    /// Масштаб окна относительно поля (поле = grid * tile_size пикселей).
+    pub window_scale: f32,
     pub grid_width: i32,
     pub grid_height: i32,
+    /// Скорость танка игрока, тайлов в секунду.
     pub tank_speed: f32,
+    /// Скорость снаряда, тайлов в секунду.
     pub bullet_speed: f32,
+    /// Размер снаряда, в тайлах.
     pub bullet_size: f32,
     pub player1_keys: PlayerKeys,
 }
@@ -26,11 +34,12 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             tile_size: 32.0,
-            grid_width: 13,
-            grid_height: 13,
-            tank_speed: 120.0,
-            bullet_speed: 300.0,
-            bullet_size: 6.0,
+            window_scale: 1.0,
+            grid_width: 26,
+            grid_height: 26,
+            tank_speed: 4.0,
+            bullet_speed: 10.0,
+            bullet_size: 0.2,
             player1_keys: PlayerKeys {
                 up: "W".into(),
                 down: "S".into(),

@@ -23,7 +23,8 @@ async fn main() {
     let playfield_w = cfg.tile_size * cfg.grid_width as f32;
     let playfield_h = cfg.tile_size * cfg.grid_height as f32;
 
-    request_new_screen_size(playfield_w, playfield_h);
+    let scale = if cfg.window_scale > 0.0 { cfg.window_scale } else { 1.0 };
+    request_new_screen_size(playfield_w * scale, playfield_h * scale);
 
     let mut game = Game::new(&cfg);
 
