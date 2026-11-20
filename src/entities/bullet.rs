@@ -113,7 +113,8 @@ impl Bullet {
         for t in tanks {
             if !t.alive { continue; }
             if t.team == self.owner_team { continue; }
-            if t.invulnerable { continue; }
+            // Защитное поле не пропускает пули: пуля о него разбивается
+            // (урона нет — это проверяет Player::hit), как в оригинале.
             if pos.x < t.pos.x + t.size
                 && pos.x + self.size > t.pos.x
                 && pos.y < t.pos.y + t.size
