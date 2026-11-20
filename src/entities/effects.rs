@@ -135,3 +135,36 @@ impl Effect {
         }
     }
 }
+
+/// Сколько секунд мерцает звёздочка перед появлением танка.
+pub const SPAWN_STAR_TIME: f32 = 1.0;
+
+/// Мерцающая звёздочка появления (как на Dandy): четырёхлучевая звезда,
+/// которая пульсирует — сжимается и разгорается — пока не появится танк.
+/// `center` — центр точки появления, `size` — размер танка,
+/// `elapsed` — сколько секунд звезда уже горит.
+pub fn draw_spawn_star(center: Vec2, size: f32, elapsed: f32) {
+    // 4 пульса за время звезды.
+    let pulse = (elapsed / SPAWN_STAR_TIME * 4.0 * std::f32::consts::TAU).sin() * 0.5 + 0.5;
+    let r = size * (0.18 + 0.32 * pulse);
+    let thin = r * 0.22;
+    let c = center;
+    let white = Color::new(1.0, 1.0, 1.0, 1.0);
+    let glow = Color::new(1.0, 0.95, 0.6, 0.9);
+
+    // Длинные лучи (вверх-вниз-влево-вправо).
+    for (dx, dy) in [(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0)] {
+        let tip = c + vec2(dx, dy) * r;
+        let side = vec2(-dy, dx) * thin;
+        draw_triangle(c + side, c - side, tip, glow);
+    }
+    // Короткие диагональные лучи.
+    let d = r * 0.55;
+    for (dx, dy) in [(1.0f32, 1.0f32), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+        let dir = vec2(dx, dy).normalize();
+        let tip = c + dir * d;
+        let side = vec2(-dir.y, dir.x) * thin * 0.7;
+        draw_triangle(c + side, c - side, tip, white);
+    }
+    draw_circle(c.x, c.y, thin * 1.3, white);
+}

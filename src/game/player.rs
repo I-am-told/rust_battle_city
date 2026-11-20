@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+use crate::entities::effects::SPAWN_STAR_TIME;
 use crate::entities::tank::{Direction, Tank};
 use crate::input::{DirectionInput, KeyBindings};
 
@@ -22,6 +23,8 @@ pub struct Player {
     /// (или ещё ни разу не погибал).
     pub respawn_timer: Option<f32>,
     pub invuln_timer: f32,
+    /// Горит звёздочка появления: сколько секунд прошло. None — не горит.
+    pub star: Option<f32>,
 }
 
 impl Player {
@@ -35,11 +38,38 @@ impl Player {
             spawn_tile,
             respawn_timer: None,
             invuln_timer: 0.0,
+            star: None,
         }
     }
 
-    /// Возродить на точке появления с защитным полем.
-    pub fn respawn(&mut self) {
+    /// Начать появление: на точке мерцает звёздочка, танка ещё нет.
+    /// Через SPAWN_STAR_TIME танк появится с защитным полем (`tick_star`).
+    pub fn begin_spawn(&mut self) {
+        self.tank.alive = false;
+        self.respawn_timer = None;
+        self.star = Some(0.0);
+    }
+
+    /// Игрок в игре: танк на поле или вот-вот появится (горит звезда).
+    pub fn in_game(&self) -> bool {
+        self.tank.alive || self.star.is_some()
+    }
+
+    /// Звёздочка появления. Когда догорит — танк появляется.
+    pub fn tick_star(&mut self, dt: f32) {
+        if let Some(t) = self.star {
+            let t = t + dt;
+            if t >= SPAWN_STAR_TIME {
+                self.star = None;
+                self.respawn();
+            } else {
+                self.star = Some(t);
+            }
+        }
+    }
+
+    /// Появиться на точке появления с защитным полем.
+    fn respawn(&mut self) {
         self.tank.pos = self.spawn;
         self.tank.prev_pos = self.spawn;
         self.tank.slide_target = None;

@@ -7,7 +7,7 @@ use crate::entities::tank::{Tank, Direction, TurnAssist};
 use crate::entities::bullet::Bullet;
 use crate::entities::spawner::EnemySpawner;
 use crate::entities::bonus::Bonus;
-use crate::entities::effects::{Effect, EffectKind};
+use crate::entities::effects::{draw_spawn_star, Effect, EffectKind, SPAWN_STAR_TIME};
 use crate::game::bonuses::apply_bonus;
 use crate::game::level::LevelConfig;
 use crate::game::hud;
@@ -46,6 +46,8 @@ pub struct Game {
     pub lives: u32,
 
     pub enemies: Vec<Tank>,
+    /// Враги, которые появляются: над точкой горит звезда (сколько прошло).
+    pub pending: Vec<(Tank, f32)>,
     pub spawner: EnemySpawner,
 
     pub bullets: Vec<Bullet>,
@@ -136,6 +138,12 @@ impl Game {
             })
             .collect();
 
+        // В начале уровня игроки тоже появляются через звёздочку.
+        let mut players = players;
+        for p in players.iter_mut() {
+            p.begin_spawn();
+        }
+
         let level_cfg = LevelConfig::for_level(level);
         let spawner = EnemySpawner::new(level_cfg, cfg.grid_width);
 
@@ -162,6 +170,7 @@ impl Game {
             players,
             lives,
             enemies: Vec::new(),
+            pending: Vec::new(),
             spawner,
             bullets: Vec::new(),
             bonuses: Vec::new(),
@@ -228,10 +237,25 @@ impl Game {
             .collect()
     }
 
+    /// Точки, где горит звёздочка появления, как танки-препятствия:
+    /// пока звезда горит, в эту точку никто не въедет.
+    /// (В пули не передаются — в звезду попасть нельзя.)
+    fn star_obstacles(&self) -> Vec<Tank> {
+        let mut v: Vec<Tank> = self.pending.iter().map(|(t, _)| t.clone()).collect();
+        for p in self.players.iter().filter(|p| p.star.is_some()) {
+            let mut t = p.tank.clone();
+            t.pos = p.spawn;
+            t.alive = true;
+            v.push(t);
+        }
+        v
+    }
+
     fn update_playing(&mut self, dt: f32) {
         // Защитные поля и возрождение.
         for i in 0..self.players.len() {
             self.players[i].tick_shield(dt);
+            self.players[i].tick_star(dt);
 
             let Some(t) = self.players[i].respawn_timer else { continue };
             let t = t - dt;
@@ -244,7 +268,7 @@ impl Game {
                 self.players[i].respawn_timer = Some(0.2);
             } else {
                 self.lives -= 1;
-                self.players[i].respawn();
+                self.players[i].begin_spawn();
             }
         }
 
@@ -268,8 +292,22 @@ impl Game {
         // Снимок всех танков для проверок столкновений. После движения
         // каждого танка его позиция в снимке обновляется, чтобы следующие
         // танки видели актуальное положение и не въезжали друг в друга.
+        // Догоревшие звёзды врагов — враг появляется.
+        for (_, t) in self.pending.iter_mut() {
+            *t += dt;
+        }
+        let (ready, waiting): (Vec<_>, Vec<_>) =
+            self.pending.drain(..).partition(|(_, t)| *t >= SPAWN_STAR_TIME);
+        self.pending = waiting;
+        for (mut tank, _) in ready {
+            tank.frozen = frozen_now;
+            self.enemies.push(tank);
+        }
+
         let np = self.players.len();
+        // Индексы: игроки, враги, затем звёзды появления (только препятствия).
         let mut snapshot = self.all_tanks();
+        snapshot.extend(self.star_obstacles());
 
         for (i, p) in self.players.iter_mut().enumerate() {
             let desired = p.dir_input.update(&p.keys);
@@ -319,8 +357,10 @@ impl Game {
             snapshot[np + i].direction = enemy.direction;
         }
 
-        let alive_enemies = self.enemies.iter().filter(|e| e.alive).count();
-        let tanks_for_spawn = self.all_tanks();
+        // Враги «на поле» с учётом тех, что уже появляются под звездой.
+        let alive_enemies = self.enemies.iter().filter(|e| e.alive).count() + self.pending.len();
+        let mut tanks_for_spawn = self.all_tanks();
+        tanks_for_spawn.extend(self.star_obstacles());
 
         if let Some(new_enemy) = self.spawner.update(
             dt,
@@ -330,7 +370,8 @@ impl Game {
             self.tank_size,
             self.tank_speed * 0.75,
         ) {
-            self.enemies.push(new_enemy);
+            // Сначала звёздочка, танк выедет через SPAWN_STAR_TIME.
+            self.pending.push((new_enemy, 0.0));
         }
 
         // Пули. Игроки в одной команде — пули проходят сквозь напарника.
@@ -442,10 +483,11 @@ impl Game {
         self.bonuses.retain(|b| b.alive);
 
         // Поражение: штаб уничтожен, или все игроки погибли и жизней нет.
-        let anyone_alive = self.players.iter().any(|p| p.tank.alive);
+        // Игрок под звёздочкой — тоже «жив»: жизнь на него уже потрачена.
+        let anyone_alive = self.players.iter().any(|p| p.in_game());
         if self.map.base_destroyed || (!anyone_alive && self.lives == 0) {
             self.state = GameState::Defeat;
-        } else if self.spawner.remaining_to_spawn == 0 && self.enemies.is_empty() {
+        } else if self.spawner.remaining_to_spawn == 0 && self.enemies.is_empty() && self.pending.is_empty() {
             // Враги кончились — игра идёт ещё VICTORY_DELAY секунд, потом победа.
             // Поражение в это время (штаб, последняя жизнь) всё ещё возможно —
             // оно проверяется выше и раньше.
@@ -483,6 +525,16 @@ impl Game {
         for b in self.bullets.iter() { b.draw(); }
         for e in self.enemies.iter() { e.draw(); }
         for p in self.players.iter() { p.tank.draw(); }
+        // Звёздочки появления.
+        let half = vec2(self.tank_size, self.tank_size) / 2.0;
+        for (t, el) in self.pending.iter() {
+            draw_spawn_star(t.pos + half, self.tank_size, *el);
+        }
+        for p in self.players.iter() {
+            if let Some(el) = p.star {
+                draw_spawn_star(p.spawn + half, self.tank_size, el);
+            }
+        }
         for fx in self.effects.iter() { fx.draw(); }
 
         match self.state {
