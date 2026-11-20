@@ -10,6 +10,14 @@ use game::state::{Game, GameState};
 
 #[macroquad::main("Battle City (Rust)")]
 async fn main() {
+    // Без зерна ГСЧ macroquad стартует с одного и того же состояния,
+    // и каждая игра (враги, бонусы) повторяется один в один.
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    rand::srand(seed);
+
     let cfg = load_config();
 
     let playfield_w = cfg.tile_size * cfg.grid_width as f32;

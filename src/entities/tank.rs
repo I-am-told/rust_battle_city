@@ -126,14 +126,28 @@ impl Tank {
         ivec2(tx, ty)
     }
 
-    fn overlaps_other_tank(&self, pos: Vec2, other: &Tank) -> bool {
+    /// Площадь пересечения танка (стоящего в `pos`) с другим танком.
+    fn overlap_area(&self, pos: Vec2, other: &Tank) -> f32 {
+        let w = (pos.x + self.size).min(other.pos.x + other.size) - pos.x.max(other.pos.x);
+        let h = (pos.y + self.size).min(other.pos.y + other.size) - pos.y.max(other.pos.y);
+        if w <= 0.0 || h <= 0.0 { 0.0 } else { w * h }
+    }
+
+    /// Мешает ли `other` встать в `pos`.
+    ///
+    /// Танк не может въехать в другой танк, но если они УЖЕ перекрываются
+    /// (появление, рывок при повороте и т.п.), разрешаем движение, которое
+    /// не увеличивает перекрытие, — иначе оба застрянут навсегда.
+    fn blocked_by_tank(&self, pos: Vec2, other: &Tank) -> bool {
         if other.id == self.id || !other.alive {
             return false;
         }
-        pos.x < other.pos.x + other.size
-            && pos.x + self.size > other.pos.x
-            && pos.y < other.pos.y + other.size
-            && pos.y + self.size > other.pos.y
+        let new_area = self.overlap_area(pos, other);
+        if new_area <= 0.0 {
+            return false;
+        }
+        let cur_area = self.overlap_area(self.pos, other);
+        new_area > cur_area + 0.001
     }
 
     fn is_clear_at_grid(&self, origin: IVec2, map: &GameMap, others: &[Tank], tile_size: f32) -> bool {
@@ -152,7 +166,7 @@ impl Tank {
         }
         let probe = vec2(origin.x as f32 * tile_size, origin.y as f32 * tile_size);
         for other in others {
-            if self.overlaps_other_tank(probe, other) {
+            if self.blocked_by_tank(probe, other) {
                 return false;
             }
         }
@@ -185,7 +199,7 @@ impl Tank {
         }
 
         for other in others {
-            if self.overlaps_other_tank(pos, other) {
+            if self.blocked_by_tank(pos, other) {
                 return false;
             }
         }
@@ -372,6 +386,9 @@ impl Tank {
         bullet_speed: f32,
         bullet_size: f32,
     ) -> Option<Bullet> {
+        if !self.alive {
+            return None;
+        }
         if active_bullets >= self.max_active_bullets {
             return None;
         }

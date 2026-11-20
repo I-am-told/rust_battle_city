@@ -32,10 +32,13 @@ pub fn apply_bonus(
             println!("Life picked! Lives: {}", player_lives);
         }
         BonusKind::Grenade => {
+            // Как в оригинале: граната уничтожает всех врагов на поле,
+            // включая бронированных (независимо от HP).
             let mut killed = 0;
             for e in enemies.iter_mut() {
                 if e.alive {
-                    e.take_hit();
+                    e.hp = 0;
+                    e.alive = false;
                     killed += 1;
                 }
             }

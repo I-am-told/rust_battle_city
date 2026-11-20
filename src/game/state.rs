@@ -187,13 +187,20 @@ impl Game {
             }
         }
 
-        let snapshot: Vec<Tank> = std::iter::once(self.player.clone())
+        // Снимок всех танков для проверок столкновений. После движения
+        // каждого танка его позиция в снимке обновляется, чтобы следующие
+        // танки видели актуальное положение и не въезжали друг в друга.
+        // Индекс 0 — игрок, индекс i + 1 — враг i.
+        let mut snapshot: Vec<Tank> = std::iter::once(self.player.clone())
             .chain(self.enemies.iter().cloned())
             .collect();
 
         self.player.update(dt, &self.keys_p1, &self.map, &snapshot, self.tile_size);
+        snapshot[0].pos = self.player.pos;
+        snapshot[0].direction = self.player.direction;
 
-        if is_key_pressed(self.keys_p1.fire) {
+        // Мёртвый игрок (ожидание возрождения) не стреляет.
+        if self.player.alive && is_key_pressed(self.keys_p1.fire) {
             let active = self.bullets
                 .iter()
                 .filter(|b| b.alive && b.owner_id == self.player.id)
@@ -210,7 +217,7 @@ impl Game {
             }
         }
 
-        for enemy in self.enemies.iter_mut() {
+        for (i, enemy) in self.enemies.iter_mut().enumerate() {
             if !enemy.alive || enemy.frozen { continue; }
 
             let active = self.bullets
@@ -229,6 +236,8 @@ impl Game {
             ) {
                 self.bullets.push(bullet);
             }
+            snapshot[i + 1].pos = enemy.pos;
+            snapshot[i + 1].direction = enemy.direction;
         }
 
         let alive_enemies = self.enemies.iter().filter(|e| e.alive).count();
@@ -264,7 +273,9 @@ impl Game {
         let mut pending_bonuses: u32 = 0;
         for id in hit_ids {
             if id == self.player.id {
-                if !self.player.invulnerable {
+                // Проверка alive: если две пули попали в одном кадре,
+                // вторая не должна отнимать ещё одну жизнь.
+                if self.player.alive && !self.player.invulnerable {
                     self.player.take_hit();
                     self.player_lives = self.player_lives.saturating_sub(1);
                     if self.player_lives == 0 {
