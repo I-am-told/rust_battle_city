@@ -6,6 +6,7 @@ mod game;
 mod menu;
 mod controls;
 mod ui_text;
+mod levels;
 
 use macroquad::prelude::*;
 use crate::ui_text::{draw_text, measure_text};
@@ -14,6 +15,7 @@ use game::state::{Game, GameState};
 use input::{any_down, any_pressed, warn_conflicts, KeyBindings, SystemBindings};
 use config::{config_dir, keys_file_path, load_keys_file, PlayerKeys};
 use menu::{Menu, MenuAction};
+use std::rc::Rc;
 
 /// Текущий экран.
 enum Screen {
@@ -95,7 +97,14 @@ async fn main() {
                 if let Some(MenuAction::Start(n)) = menu.update(&mut all_keys, &base_keys, &sys) {
                     last_menu_choice = menu.selected;
                     let keys = all_keys[..n.min(all_keys.len())].to_vec();
-                    next = Some(Screen::Game(Box::new(Game::new(&cfg, keys))));
+                    // Карты перечитываются при каждом старте: нарисовал —
+                    // вышел в меню — играешь, без перезапуска программы.
+                    let lv = levels::load_levels(
+                        &config_dir().join("levels"),
+                        cfg.grid_width,
+                        cfg.grid_height,
+                    );
+                    next = Some(Screen::Game(Box::new(Game::new(&cfg, keys, Rc::new(lv)))));
                 }
                 menu.draw(&all_keys);
                 draw_quit_hint(false, &sys, quit_held);

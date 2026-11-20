@@ -11,6 +11,8 @@ use crate::game::bonuses::apply_bonus;
 use crate::game::level::LevelConfig;
 use crate::game::hud;
 use crate::game::player::{Player, PLAYER_ID_BASE};
+use crate::levels::LevelSet;
+use std::rc::Rc;
 
 pub const BONUS_LIFETIME: f32 = 15.0;
 pub const MAX_RANK: u8 = 3;
@@ -60,16 +62,18 @@ pub struct Game {
     pub picked_bonuses: u32,
     /// Текущий уровень (1-based). При победе увеличивается.
     pub current_level: u32,
+    /// Карты уровней (из папки levels).
+    pub levels: Rc<LevelSet>,
 }
 
 impl Game {
     /// Новая игра с 1-го уровня. Число игроков = длина `keys` (1 или 2).
     /// Клавиши разбираются один раз в main, чтобы предупреждения
     /// о кривых клавишах не повторялись каждый уровень.
-    pub fn new(cfg: &Config, keys: Vec<KeyBindings>) -> Self {
+    pub fn new(cfg: &Config, keys: Vec<KeyBindings>, levels: Rc<LevelSet>) -> Self {
         let n = keys.len() as u32;
         let ranks = vec![0; keys.len()];
-        Self::new_with_progress(cfg, keys, 1, START_LIVES_PER_PLAYER * n, ranks)
+        Self::new_with_progress(cfg, keys, levels, 1, START_LIVES_PER_PLAYER * n, ranks)
     }
 
     /// Создаёт игру на уровне `level` с сохранением прогресса:
@@ -77,11 +81,14 @@ impl Game {
     pub fn new_with_progress(
         cfg: &Config,
         keys: Vec<KeyBindings>,
+        levels: Rc<LevelSet>,
         level: u32,
         lives: u32,
         ranks: Vec<u8>,
     ) -> Self {
-        let map = GameMap::new(cfg.grid_width, cfg.grid_height);
+        let layout = levels.layout_for(level);
+        let from_file = layout.is_some();
+        let mut map = GameMap::with_layout(cfg.grid_width, cfg.grid_height, layout);
         let tank_size = cfg.tile_size * 2.0;
         // Скорости и размеры в конфиге — в тайлах; внутри игры — пиксели.
         let tank_speed_px = cfg.tank_speed * cfg.tile_size;
@@ -127,6 +134,19 @@ impl Game {
         let level_cfg = LevelConfig::for_level(level);
         let spawner = EnemySpawner::new(level_cfg, cfg.grid_width);
 
+        // Точки появления врагов и игроков должны быть свободны —
+        // расчищаем, если на карте там что-то нарисовано.
+        let mut spawn_areas: Vec<IVec2> = spawner.spawn_points().to_vec();
+        spawn_areas.extend(players.iter().map(|p| p.spawn_tile));
+        for t in spawn_areas {
+            if map.clear_area(t.x, t.y, 2, 2) && from_file {
+                eprintln!(
+                    "Уровень {level}: точка появления (тайл {}, {}) была занята на карте — расчищена.",
+                    t.x, t.y
+                );
+            }
+        }
+
         Self {
             tile_size: cfg.tile_size,
             tank_size,
@@ -148,6 +168,7 @@ impl Game {
             victory_timer: None,
             picked_bonuses: 0,
             current_level: level,
+            levels,
         }
     }
 
@@ -393,7 +414,8 @@ impl Game {
         let next_level = self.current_level + 1;
         let ranks: Vec<u8> = self.players.iter().map(|p| p.tank.rank).collect();
         let keys: Vec<KeyBindings> = self.players.iter().map(|p| p.keys.clone()).collect();
-        *self = Self::new_with_progress(cfg, keys, next_level, self.lives, ranks);
+        let levels = self.levels.clone();
+        *self = Self::new_with_progress(cfg, keys, levels, next_level, self.lives, ranks);
     }
 
     pub fn draw(&self) {

@@ -28,8 +28,15 @@ pub struct GameMap {
 }
 
 impl GameMap {
-    pub fn new(width: i32, height: i32) -> Self {
-        let mut tiles = vec![Tile::Empty; (width * height) as usize];
+    /// Карта из раскладки (тайлы поля построчно, длина width*height).
+    /// None — встроенная тестовая раскладка (если в папке levels нет карт). Штаб и кирпичная стена вокруг
+    /// него ставятся всегда, поверх раскладки.
+    pub fn with_layout(width: i32, height: i32, layout: Option<&[Tile]>) -> Self {
+        let mut tiles = match layout {
+            Some(l) if l.len() == (width * height) as usize => l.to_vec(),
+            _ => vec![Tile::Empty; (width * height) as usize],
+        };
+        let builtin = layout.is_none();
 
         // Запись тайла с проверкой границ: тестовая раскладка рассчитана
         // на 26x26, при другом размере поля лишнее просто отбрасывается.
@@ -44,9 +51,11 @@ impl GameMap {
         };
 
         // Тестовая раскладка (координаты в тайлах, танк = 2x2).
-        fill(10, 8, 6, 4, Tile::Brick);
-        fill(6, 16, 4, 4, Tile::Water);
-        fill(16, 4, 4, 4, Tile::Steel);
+        if builtin {
+            fill(10, 8, 6, 4, Tile::Brick);
+            fill(6, 16, 4, 4, Tile::Water);
+            fill(16, 4, 4, 4, Tile::Steel);
+        }
 
         let base_x = (width - 2) / 2;
         let base_y = height - 2;
@@ -92,6 +101,21 @@ impl GameMap {
 
     fn in_bounds(&self, x: i32, y: i32) -> bool {
         x >= 0 && x < self.width && y >= 0 && y < self.height
+    }
+
+    /// Очистить прямоугольник тайлов (точки появления танков).
+    /// Возвращает true, если там что-то было.
+    pub fn clear_area(&mut self, x0: i32, y0: i32, w: i32, h: i32) -> bool {
+        let mut cleared = false;
+        for y in y0..y0 + h {
+            for x in x0..x0 + w {
+                if self.in_bounds(x, y) && self.get_tile(x, y) != Tile::Empty {
+                    self.set_tile(x, y, Tile::Empty);
+                    cleared = true;
+                }
+            }
+        }
+        cleared
     }
 
     /// Поставить тайл (кирпич — целым). За пределами поля — ничего.
