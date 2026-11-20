@@ -102,37 +102,12 @@ impl Bullet {
     }
 
     fn collides_tile(&self, pos: Vec2, map: &GameMap, tile_size: f32) -> bool {
-        let epsilon = 0.001;
-        let left   = (pos.x / tile_size).floor() as i32;
-        let right  = ((pos.x + self.size - epsilon) / tile_size).floor() as i32;
-        let top    = (pos.y / tile_size).floor() as i32;
-        let bottom = ((pos.y + self.size - epsilon) / tile_size).floor() as i32;
-
-        for ty in top..=bottom {
-            for tx in left..=right {
-                if map.is_blocked_for_bullet(tx, ty) {
-                    return true;
-                }
-            }
-        }
-        false
+        // Точность — четвертинка тайла: в пробитую дыру пуля пролетает.
+        map.rect_blocked(pos, vec2(self.size, self.size), tile_size, true)
     }
 
     fn damage_hit_tile(&self, pos: Vec2, map: &mut GameMap, tile_size: f32) {
-        let epsilon = 0.001;
-        let left   = (pos.x / tile_size).floor() as i32;
-        let right  = ((pos.x + self.size - epsilon) / tile_size).floor() as i32;
-        let top    = (pos.y / tile_size).floor() as i32;
-        let bottom = ((pos.y + self.size - epsilon) / tile_size).floor() as i32;
-
-        for ty in top..=bottom {
-            for tx in left..=right {
-                if map.is_blocked_for_bullet(tx, ty) {
-                    map.damage_at(tx, ty, self.pierces_steel);
-                    return;
-                }
-            }
-        }
+        map.bullet_hit(pos, self.size, self.direction.vector(), tile_size, self.pierces_steel);
     }
 
     pub fn resolve_mutual_destruction(bullets: &mut [Bullet]) {

@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+use crate::ui_text::{draw_text, measure_text};
 use crate::config::Config;
 use crate::input::KeyBindings;
 use crate::map::GameMap;

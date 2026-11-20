@@ -5,8 +5,10 @@ mod entities;
 mod game;
 mod menu;
 mod controls;
+mod ui_text;
 
 use macroquad::prelude::*;
+use crate::ui_text::{draw_text, measure_text};
 use config::load_config;
 use game::state::{Game, GameState};
 use input::{any_down, any_pressed, warn_conflicts, KeyBindings, SystemBindings};
@@ -28,6 +30,9 @@ async fn main() {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
     rand::srand(seed);
+
+    // Заполнить атлас шрифта заранее — см. ui_text (чёрные квадраты вместо текста).
+    ui_text::warm_up();
 
     let cfg = load_config();
     let sys: SystemBindings = (&cfg.system_keys).into();

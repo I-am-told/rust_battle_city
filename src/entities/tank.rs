@@ -192,14 +192,10 @@ impl Tank {
         if origin.x + 2 > map.width || origin.y + 2 > map.height {
             return false;
         }
-        for dy in 0..2 {
-            for dx in 0..2 {
-                if map.is_blocked_for_tank(origin.x + dx, origin.y + dy) {
-                    return false;
-                }
-            }
-        }
         let probe = vec2(origin.x as f32 * tile_size, origin.y as f32 * tile_size);
+        if map.rect_blocked(probe, vec2(self.size, self.size), tile_size, false) {
+            return false;
+        }
         for other in others {
             if self.blocked_by_tank(probe, other) {
                 return false;
@@ -219,18 +215,9 @@ impl Tank {
             return false;
         }
 
-        let epsilon = 0.001;
-        let left   = (pos.x / tile_size).floor() as i32;
-        let right  = ((pos.x + self.size - epsilon) / tile_size).floor() as i32;
-        let top    = (pos.y / tile_size).floor() as i32;
-        let bottom = ((pos.y + self.size - epsilon) / tile_size).floor() as i32;
-
-        for ty in top..=bottom {
-            for tx in left..=right {
-                if map.is_blocked_for_tank(tx, ty) {
-                    return false;
-                }
-            }
+        // Точность — четвертинка тайла: в выбитый проём можно проехать.
+        if map.rect_blocked(pos, vec2(self.size, self.size), tile_size, false) {
+            return false;
         }
 
         for other in others {
@@ -507,8 +494,6 @@ impl Tank {
         if p.x < 0.0 || p.y < 0.0 || p.x >= playfield_w || p.y >= playfield_h {
             return false;
         }
-        let tx = (p.x / tile_size).floor() as i32;
-        let ty = (p.y / tile_size).floor() as i32;
-        !map.is_blocked_for_bullet(tx, ty)
+        !map.rect_blocked(p, vec2(0.01, 0.01), tile_size, true)
     }
 }
