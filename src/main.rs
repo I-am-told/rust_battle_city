@@ -4,12 +4,13 @@ mod map;
 mod entities;
 mod game;
 mod menu;
+mod controls;
 
 use macroquad::prelude::*;
 use config::load_config;
 use game::state::{Game, GameState};
 use input::{any_down, any_pressed, warn_conflicts, KeyBindings, SystemBindings};
-use config::PlayerKeys;
+use config::{config_dir, keys_file_path, load_keys_file, PlayerKeys};
 use menu::{Menu, MenuAction};
 
 /// Текущий экран.
@@ -31,10 +32,22 @@ async fn main() {
     let cfg = load_config();
     let sys: SystemBindings = (&cfg.system_keys).into();
     // Клавиши обоих игроков (в игре на одного используются только P1).
-    let all_keys: Vec<KeyBindings> = vec![
-        KeyBindings::from_config("P1", &cfg.player1_keys, &PlayerKeys::default()),
+    // base_keys — из config.ron (к ним возвращает RESET в меню CONTROLS),
+    // all_keys — с учётом keys.ron (назначены в меню, главнее config.ron).
+    let base_keys: Vec<KeyBindings> = vec![
+        KeyBindings::from_config("P1", &cfg.player1_keys, &PlayerKeys::player1_default()),
         KeyBindings::from_config("P2", &cfg.player2_keys, &PlayerKeys::player2_default()),
     ];
+    let keys_path = keys_file_path(&config_dir());
+    let mut all_keys = base_keys.clone();
+    if let Some(kf) = load_keys_file(&keys_path) {
+        if let Some(pk) = &kf.player1_keys {
+            all_keys[0] = KeyBindings::from_config("P1 (keys.ron)", pk, &PlayerKeys::player1_default());
+        }
+        if let Some(pk) = &kf.player2_keys {
+            all_keys[1] = KeyBindings::from_config("P2 (keys.ron)", pk, &PlayerKeys::player2_default());
+        }
+    }
     warn_conflicts(&all_keys, &sys);
 
     let playfield_w = cfg.tile_size * cfg.grid_width as f32;
@@ -43,7 +56,7 @@ async fn main() {
     let scale = if cfg.window_scale > 0.0 { cfg.window_scale } else { 1.0 };
     request_new_screen_size(playfield_w * scale, playfield_h * scale);
 
-    let mut screen = Screen::Menu(Menu::new());
+    let mut screen = Screen::Menu(Menu::new(0, &keys_path));
     // Последний выбор в меню (после GAME OVER курсор стоит на нём).
     let mut last_menu_choice: usize = 0;
     // Сколько секунд удерживается клавиша выхода.
@@ -74,7 +87,7 @@ async fn main() {
         let mut next: Option<Screen> = None;
         match &mut screen {
             Screen::Menu(menu) => {
-                if let Some(MenuAction::Start(n)) = menu.update(&all_keys, &sys) {
+                if let Some(MenuAction::Start(n)) = menu.update(&mut all_keys, &base_keys, &sys) {
                     last_menu_choice = menu.selected;
                     let keys = all_keys[..n.min(all_keys.len())].to_vec();
                     next = Some(Screen::Game(Box::new(Game::new(&cfg, keys))));
@@ -91,7 +104,7 @@ async fn main() {
                     match game.state {
                         GameState::Victory => game.advance_level(&cfg),
                         GameState::Defeat => {
-                            next = Some(Screen::Menu(Menu { selected: last_menu_choice }));
+                            next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path)));
                         }
                         GameState::Playing => game.toggle_pause(),
                     }

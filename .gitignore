@@ -1,2 +1,6 @@
 /target
 .idea/
+
+# Клавиши, назначенные в меню CONTROLS (локальные для каждого компьютера)
+keys.ron
+keys.ron.tmp

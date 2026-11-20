@@ -1,11 +1,11 @@
 use macroquad::prelude::KeyCode;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Одна клавиша или список клавиш для действия.
 /// В config.ron можно писать и `fire: "Space"`, и `fire: ["Space", "J"]`.
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum KeyList {
     One(String),
@@ -20,43 +20,49 @@ impl KeyList {
         }
     }
 
-    fn many(names: &[&str]) -> Self {
+    pub fn many(names: &[&str]) -> Self {
         KeyList::Many(names.iter().map(|s| s.to_string()).collect())
     }
 }
 
-#[derive(Deserialize, Clone, Debug)]
+/// Клавиши игрока. Действие, которого нет в файле (None), берётся
+/// из раскладки по умолчанию ЭТОГО игрока (см. KeyBindings::from_config),
+/// а не из раскладки P1.
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 #[serde(default)]
 pub struct PlayerKeys {
-    pub up: KeyList,
-    pub down: KeyList,
-    pub left: KeyList,
-    pub right: KeyList,
-    pub fire: KeyList,
-}
-
-impl Default for PlayerKeys {
-    /// Раскладка игрока 1 по умолчанию.
-    fn default() -> Self {
-        Self {
-            up: KeyList::many(&["W"]),
-            down: KeyList::many(&["S"]),
-            left: KeyList::many(&["A"]),
-            right: KeyList::many(&["D"]),
-            fire: KeyList::many(&["Space"]),
-        }
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub up: Option<KeyList>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub down: Option<KeyList>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left: Option<KeyList>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub right: Option<KeyList>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fire: Option<KeyList>,
 }
 
 impl PlayerKeys {
-    /// Раскладка игрока 2 по умолчанию: стрелки + правый Ctrl или «/».
+    /// Раскладка игрока 1 по умолчанию: WASD + левый Ctrl.
+    pub fn player1_default() -> Self {
+        Self {
+            up: Some(KeyList::many(&["W"])),
+            down: Some(KeyList::many(&["S"])),
+            left: Some(KeyList::many(&["A"])),
+            right: Some(KeyList::many(&["D"])),
+            fire: Some(KeyList::many(&["LCtrl"])),
+        }
+    }
+
+    /// Раскладка игрока 2 по умолчанию: стрелки + пробел.
     pub fn player2_default() -> Self {
         Self {
-            up: KeyList::many(&["Up"]),
-            down: KeyList::many(&["Down"]),
-            left: KeyList::many(&["Left"]),
-            right: KeyList::many(&["Right"]),
-            fire: KeyList::many(&["RCtrl", "Slash"]),
+            up: Some(KeyList::many(&["Up"])),
+            down: Some(KeyList::many(&["Down"])),
+            left: Some(KeyList::many(&["Left"])),
+            right: Some(KeyList::many(&["Right"])),
+            fire: Some(KeyList::many(&["Space"])),
         }
     }
 }
@@ -118,7 +124,7 @@ impl Default for Config {
             bullet_speed: 10.0,
             bullet_size: 0.2,
             turn_assist: "smooth".into(),
-            player1_keys: PlayerKeys::default(),
+            player1_keys: PlayerKeys::player1_default(),
             player2_keys: PlayerKeys::player2_default(),
             system_keys: SystemKeys::default(),
         }
@@ -126,6 +132,72 @@ impl Default for Config {
 }
 
 const CONFIG_NAME: &str = "config.ron";
+
+/// Папка, где лежит найденный config.ron (или текущая, если его нет).
+/// Там же хранится keys.ron с клавишами, назначенными в меню.
+pub fn config_dir() -> PathBuf {
+    for path in config_candidates() {
+        if path.is_file() {
+            if let Some(dir) = path.parent() {
+                return dir.to_path_buf();
+            }
+        }
+    }
+    PathBuf::from(".")
+}
+
+pub const KEYS_FILE_NAME: &str = "keys.ron";
+
+/// Клавиши, назначенные в меню CONTROLS. Если файл есть, его клавиши
+/// главнее клавиш из config.ron (сам config.ron не перезаписывается).
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct KeysFile {
+    pub player1_keys: Option<PlayerKeys>,
+    pub player2_keys: Option<PlayerKeys>,
+}
+
+/// RON-настройки для config.ron и keys.ron: `Some(...)` писать не нужно
+/// (implicit_some), чтобы файлы было удобно править руками.
+fn ron_options() -> ron::Options {
+    ron::Options::default().with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+}
+
+pub fn keys_file_path(dir: &Path) -> PathBuf {
+    let p = dir.join(KEYS_FILE_NAME);
+    // "./keys.ron" в сообщениях выглядит хуже, чем "keys.ron".
+    p.strip_prefix(".").map(|x| x.to_path_buf()).unwrap_or(p)
+}
+
+/// Читает keys.ron. Нет файла — None; ошибка разбора — предупреждение и None.
+pub fn load_keys_file(path: &Path) -> Option<KeysFile> {
+    let text = fs::read_to_string(path).ok()?;
+    match ron_options().from_str::<KeysFile>(&text) {
+        Ok(k) => {
+            println!("Клавиши из меню загружены: {}", path.display());
+            Some(k)
+        }
+        Err(e) => {
+            eprintln!("Ошибка разбора {}: {e}\nИгнорирую, беру клавиши из config.ron.", path.display());
+            None
+        }
+    }
+}
+
+/// Записывает keys.ron (через временный файл, чтобы не оставить битый файл).
+pub fn save_keys_file(path: &Path, keys: &KeysFile) -> Result<(), String> {
+    let pretty = ron::ser::PrettyConfig::new().compact_arrays(true);
+    let body = ron_options()
+        .to_string_pretty(keys, pretty)
+        .map_err(|e| e.to_string())?;
+    let text = format!(
+        "// Клавиши, назначенные в меню CONTROLS. Главнее, чем в config.ron.\n\
+         // Удалите этот файл (или нажмите RESET в меню), чтобы вернуть клавиши из config.ron.\n{body}\n"
+    );
+    let tmp = path.with_extension("ron.tmp");
+    fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
 
 /// Где искать конфиг: текущая папка, затем папка с бинарником.
 fn config_candidates() -> Vec<PathBuf> {
@@ -141,6 +213,11 @@ fn config_candidates() -> Vec<PathBuf> {
     out
 }
 
+/// Разбирает текст config.ron.
+pub fn parse_config(text: &str) -> Result<Config, ron::error::SpannedError> {
+    ron_options().from_str::<Config>(text)
+}
+
 /// Загружает конфиг. Поля, которых нет в файле, берутся по умолчанию.
 pub fn load_config() -> Config {
     for path in config_candidates() {
@@ -148,7 +225,7 @@ pub fn load_config() -> Config {
             Ok(t) => t,
             Err(_) => continue,
         };
-        return match ron::from_str::<Config>(&text) {
+        return match parse_config(&text) {
             Ok(cfg) => {
                 println!("Конфиг загружен: {}", path.display());
                 cfg
@@ -166,84 +243,79 @@ pub fn load_config() -> Config {
     Config::default()
 }
 
-/// Переводит имя клавиши из конфига в KeyCode. Регистр не важен.
-/// Буквы: "A".."Z"; цифры: "0".."9"; цифровой блок: "Num0".."Num9",
-/// "NumEnter", "NumPlus", "NumMinus", "NumMultiply", "NumDivide", "NumDot";
-/// стрелки: "Up", "Down", "Left", "Right"; "F1".."F12";
-/// "Space", "Enter", "Tab", "Backspace", "Escape"/"Esc", "Insert", "Delete",
-/// "Home", "End", "PageUp", "PageDown", "CapsLock";
-/// модификаторы: "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt"
-/// (а также "Shift", "Ctrl", "Alt" = левые);
-/// знаки: "Minus", "Equal", "LeftBracket", "RightBracket", "Semicolon",
-/// "Apostrophe", "Comma", "Period", "Slash", "Backslash", "Grave".
-pub fn parse_key(name: &str) -> Option<KeyCode> {
+/// Каноничные имена клавиш: так они пишутся в keys.ron и показываются
+/// в меню. В config.ron можно писать и эти имена, и синонимы (см. ALIASES).
+/// Регистр не важен.
+const KEY_TABLE: &[(&str, KeyCode)] = {
     use KeyCode::*;
-    let n = name.trim().to_uppercase();
-    let k = match n.as_str() {
-        "A" => A, "B" => B, "C" => C, "D" => D, "E" => E, "F" => F, "G" => G,
-        "H" => H, "I" => I, "J" => J, "K" => K, "L" => L, "M" => M, "N" => N,
-        "O" => O, "P" => P, "Q" => Q, "R" => R, "S" => S, "T" => T, "U" => U,
-        "V" => V, "W" => W, "X" => X, "Y" => Y, "Z" => Z,
+    &[
+        ("A", A), ("B", B), ("C", C), ("D", D), ("E", E), ("F", F), ("G", G),
+        ("H", H), ("I", I), ("J", J), ("K", K), ("L", L), ("M", M), ("N", N),
+        ("O", O), ("P", P), ("Q", Q), ("R", R), ("S", S), ("T", T), ("U", U),
+        ("V", V), ("W", W), ("X", X), ("Y", Y), ("Z", Z),
+        ("0", Key0), ("1", Key1), ("2", Key2), ("3", Key3), ("4", Key4),
+        ("5", Key5), ("6", Key6), ("7", Key7), ("8", Key8), ("9", Key9),
+        ("Num0", Kp0), ("Num1", Kp1), ("Num2", Kp2), ("Num3", Kp3), ("Num4", Kp4),
+        ("Num5", Kp5), ("Num6", Kp6), ("Num7", Kp7), ("Num8", Kp8), ("Num9", Kp9),
+        ("NumEnter", KpEnter), ("NumPlus", KpAdd), ("NumMinus", KpSubtract),
+        ("NumMultiply", KpMultiply), ("NumDivide", KpDivide), ("NumDot", KpDecimal),
+        ("Up", Up), ("Down", Down), ("Left", Left), ("Right", Right),
+        ("F1", F1), ("F2", F2), ("F3", F3), ("F4", F4), ("F5", F5), ("F6", F6),
+        ("F7", F7), ("F8", F8), ("F9", F9), ("F10", F10), ("F11", F11), ("F12", F12),
+        ("Space", Space), ("Enter", Enter), ("Tab", Tab), ("Backspace", Backspace),
+        ("Escape", Escape), ("Insert", Insert), ("Delete", Delete),
+        ("Home", Home), ("End", End), ("PageUp", PageUp), ("PageDown", PageDown),
+        ("CapsLock", CapsLock),
+        ("LShift", LeftShift), ("RShift", RightShift),
+        ("LCtrl", LeftControl), ("RCtrl", RightControl),
+        ("LAlt", LeftAlt), ("RAlt", RightAlt),
+        ("Minus", Minus), ("Equal", Equal), ("LeftBracket", LeftBracket),
+        ("RightBracket", RightBracket), ("Semicolon", Semicolon),
+        ("Apostrophe", Apostrophe), ("Comma", Comma), ("Period", Period),
+        ("Slash", Slash), ("Backslash", Backslash), ("Grave", GraveAccent),
+    ]
+};
 
-        "0" => Key0, "1" => Key1, "2" => Key2, "3" => Key3, "4" => Key4,
-        "5" => Key5, "6" => Key6, "7" => Key7, "8" => Key8, "9" => Key9,
+/// Синонимы (только для чтения конфига).
+const ALIASES: &[(&str, KeyCode)] = {
+    use KeyCode::*;
+    &[
+        ("Kp0", Kp0), ("Kp1", Kp1), ("Kp2", Kp2), ("Kp3", Kp3), ("Kp4", Kp4),
+        ("Kp5", Kp5), ("Kp6", Kp6), ("Kp7", Kp7), ("Kp8", Kp8), ("Kp9", Kp9),
+        ("KpEnter", KpEnter), ("KpAdd", KpAdd), ("KpSubtract", KpSubtract),
+        ("KpMultiply", KpMultiply), ("KpDivide", KpDivide), ("KpDecimal", KpDecimal),
+        ("Return", Enter), ("Esc", Escape),
+        ("Shift", LeftShift), ("LeftShift", LeftShift), ("RightShift", RightShift),
+        ("Ctrl", LeftControl), ("LeftCtrl", LeftControl), ("LeftControl", LeftControl),
+        ("RightCtrl", RightControl), ("RightControl", RightControl),
+        ("Alt", LeftAlt), ("LeftAlt", LeftAlt), ("RightAlt", RightAlt),
+    ]
+};
 
-        "NUM0" | "KP0" => Kp0, "NUM1" | "KP1" => Kp1, "NUM2" | "KP2" => Kp2,
-        "NUM3" | "KP3" => Kp3, "NUM4" | "KP4" => Kp4, "NUM5" | "KP5" => Kp5,
-        "NUM6" | "KP6" => Kp6, "NUM7" | "KP7" => Kp7, "NUM8" | "KP8" => Kp8,
-        "NUM9" | "KP9" => Kp9,
-        "NUMENTER" | "KPENTER" => KpEnter,
-        "NUMPLUS" | "KPADD" => KpAdd,
-        "NUMMINUS" | "KPSUBTRACT" => KpSubtract,
-        "NUMMULTIPLY" | "KPMULTIPLY" => KpMultiply,
-        "NUMDIVIDE" | "KPDIVIDE" => KpDivide,
-        "NUMDOT" | "KPDECIMAL" => KpDecimal,
-
-        "UP" => Up, "DOWN" => Down, "LEFT" => Left, "RIGHT" => Right,
-
-        "F1" => F1, "F2" => F2, "F3" => F3, "F4" => F4, "F5" => F5, "F6" => F6,
-        "F7" => F7, "F8" => F8, "F9" => F9, "F10" => F10, "F11" => F11, "F12" => F12,
-
-        "SPACE" => Space,
-        "ENTER" | "RETURN" => Enter,
-        "TAB" => Tab,
-        "BACKSPACE" => Backspace,
-        "ESCAPE" | "ESC" => Escape,
-        "INSERT" => Insert,
-        "DELETE" => Delete,
-        "HOME" => Home,
-        "END" => End,
-        "PAGEUP" => PageUp,
-        "PAGEDOWN" => PageDown,
-        "CAPSLOCK" => CapsLock,
-
-        "SHIFT" | "LSHIFT" | "LEFTSHIFT" => LeftShift,
-        "RSHIFT" | "RIGHTSHIFT" => RightShift,
-        "CTRL" | "LCTRL" | "LEFTCTRL" | "LEFTCONTROL" => LeftControl,
-        "RCTRL" | "RIGHTCTRL" | "RIGHTCONTROL" => RightControl,
-        "ALT" | "LALT" | "LEFTALT" => LeftAlt,
-        "RALT" | "RIGHTALT" => RightAlt,
-
-        "MINUS" => Minus,
-        "EQUAL" => Equal,
-        "LEFTBRACKET" => LeftBracket,
-        "RIGHTBRACKET" => RightBracket,
-        "SEMICOLON" => Semicolon,
-        "APOSTROPHE" => Apostrophe,
-        "COMMA" => Comma,
-        "PERIOD" => Period,
-        "SLASH" => Slash,
-        "BACKSLASH" => Backslash,
-        "GRAVE" => GraveAccent,
-
-        _ => return None,
-    };
-    Some(k)
+/// Переводит имя клавиши из конфига в KeyCode. Регистр не важен.
+/// Полный список имён — в KEY_TABLE и ALIASES (и в комментарии в config.ron).
+pub fn parse_key(name: &str) -> Option<KeyCode> {
+    let n = name.trim();
+    KEY_TABLE
+        .iter()
+        .chain(ALIASES.iter())
+        .find(|(k, _)| k.eq_ignore_ascii_case(n))
+        .map(|(_, code)| *code)
 }
 
-/// Переводит список имён в список клавиш. Неизвестные имена пропускаются
-/// с предупреждением; если не осталось ни одной — берутся `fallback`.
-pub fn parse_keys(action: &str, list: &KeyList, fallback: &KeyList) -> Vec<KeyCode> {
+/// Каноничное имя клавиши (для keys.ron и меню). None — клавиша не поддерживается.
+pub fn key_name(code: KeyCode) -> Option<&'static str> {
+    KEY_TABLE.iter().find(|(_, c)| *c == code).map(|(n, _)| *n)
+}
+
+/// Переводит список имён в список клавиш. Нет списка (None) — берётся
+/// `fallback`. Неизвестные имена пропускаются с предупреждением;
+/// если не осталось ни одной — тоже берётся `fallback`.
+pub fn parse_keys(action: &str, list: Option<&KeyList>, fallback: Option<&KeyList>) -> Vec<KeyCode> {
+    let fallback_keys = || -> Vec<KeyCode> {
+        fallback.map(|f| f.names().iter().filter_map(|n| parse_key(n)).collect()).unwrap_or_default()
+    };
+    let Some(list) = list else { return fallback_keys() };
     let mut out = Vec::new();
     for name in list.names() {
         match parse_key(&name) {
@@ -257,7 +329,7 @@ pub fn parse_keys(action: &str, list: &KeyList, fallback: &KeyList) -> Vec<KeyCo
     }
     if out.is_empty() {
         eprintln!("Для '{action}' не задано ни одной рабочей клавиши — беру по умолчанию.");
-        out = fallback.names().iter().filter_map(|n| parse_key(n)).collect();
+        out = fallback_keys();
     }
     out
 }

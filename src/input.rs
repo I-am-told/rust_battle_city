@@ -1,5 +1,5 @@
 use macroquad::prelude::{is_key_down, is_key_pressed, KeyCode};
-use crate::config::{parse_keys, PlayerKeys, SystemKeys};
+use crate::config::{key_name, parse_keys, KeyList, PlayerKeys, SystemKeys};
 use crate::entities::direction::Direction;
 
 pub fn any_down(keys: &[KeyCode]) -> bool {
@@ -8,6 +8,14 @@ pub fn any_down(keys: &[KeyCode]) -> bool {
 
 pub fn any_pressed(keys: &[KeyCode]) -> bool {
     keys.iter().any(|k| is_key_pressed(*k))
+}
+
+/// Названия действий игрока — в порядке `KeyBindings::action`.
+pub const ACTIONS: [&str; 5] = ["UP", "DOWN", "LEFT", "RIGHT", "FIRE"];
+
+/// Имя клавиши для показа: каноничное из таблицы или Debug-имя.
+pub fn display_name(k: KeyCode) -> String {
+    key_name(k).map(|s| s.to_string()).unwrap_or_else(|| format!("{k:?}"))
 }
 
 /// Клавиши одного игрока. На каждое действие — список клавиш.
@@ -25,11 +33,11 @@ impl KeyBindings {
     /// `d` — раскладка по умолчанию на случай кривых клавиш.
     pub fn from_config(who: &str, pk: &PlayerKeys, d: &PlayerKeys) -> Self {
         Self {
-            up:    parse_keys(&format!("{who} up"), &pk.up, &d.up),
-            down:  parse_keys(&format!("{who} down"), &pk.down, &d.down),
-            left:  parse_keys(&format!("{who} left"), &pk.left, &d.left),
-            right: parse_keys(&format!("{who} right"), &pk.right, &d.right),
-            fire:  parse_keys(&format!("{who} fire"), &pk.fire, &d.fire),
+            up:    parse_keys(&format!("{who} up"), pk.up.as_ref(), d.up.as_ref()),
+            down:  parse_keys(&format!("{who} down"), pk.down.as_ref(), d.down.as_ref()),
+            left:  parse_keys(&format!("{who} left"), pk.left.as_ref(), d.left.as_ref()),
+            right: parse_keys(&format!("{who} right"), pk.right.as_ref(), d.right.as_ref()),
+            fire:  parse_keys(&format!("{who} fire"), pk.fire.as_ref(), d.fire.as_ref()),
         }
     }
 
@@ -44,6 +52,41 @@ impl KeyBindings {
 
     pub fn fire_pressed(&self) -> bool {
         any_pressed(&self.fire)
+    }
+
+    /// Клавиши действия по номеру (0..5, см. ACTIONS).
+    pub fn action(&self, i: usize) -> &Vec<KeyCode> {
+        match i {
+            0 => &self.up,
+            1 => &self.down,
+            2 => &self.left,
+            3 => &self.right,
+            _ => &self.fire,
+        }
+    }
+
+    pub fn action_mut(&mut self, i: usize) -> &mut Vec<KeyCode> {
+        match i {
+            0 => &mut self.up,
+            1 => &mut self.down,
+            2 => &mut self.left,
+            3 => &mut self.right,
+            _ => &mut self.fire,
+        }
+    }
+
+    /// Обратно в формат конфига (для сохранения в keys.ron).
+    pub fn to_player_keys(&self) -> PlayerKeys {
+        let names = |keys: &[KeyCode]| {
+            Some(KeyList::Many(keys.iter().filter_map(|k| key_name(*k)).map(String::from).collect()))
+        };
+        PlayerKeys {
+            up: names(&self.up),
+            down: names(&self.down),
+            left: names(&self.left),
+            right: names(&self.right),
+            fire: names(&self.fire),
+        }
     }
 
     pub fn up_pressed(&self) -> bool {
@@ -71,7 +114,7 @@ impl KeyBindings {
     /// Короткое описание для экрана меню: "W/S/A/D, fire: Space".
     pub fn describe(&self) -> String {
         let names = |keys: &[KeyCode]| {
-            keys.iter().map(|k| format!("{k:?}")).collect::<Vec<_>>().join("|")
+            keys.iter().map(|k| display_name(*k)).collect::<Vec<_>>().join("|")
         };
         format!(
             "{}/{}/{}/{}  fire: {}",
@@ -93,8 +136,8 @@ impl From<&SystemKeys> for SystemBindings {
     fn from(sk: &SystemKeys) -> Self {
         let d = SystemKeys::default();
         Self {
-            start: parse_keys("start", &sk.start, &d.start),
-            quit: parse_keys("quit", &sk.quit, &d.quit),
+            start: parse_keys("start", Some(&sk.start), Some(&d.start)),
+            quit: parse_keys("quit", Some(&sk.quit), Some(&d.quit)),
             quit_hold_seconds: sk.quit_hold_seconds.max(0.0),
         }
     }

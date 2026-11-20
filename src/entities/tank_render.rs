@@ -13,8 +13,8 @@ impl Tank {
 
         // Цвет корпуса по типу.
         let color = match self.team {
-            // P1 — зелёный (как было), P2 — жёлтый.
-            Team::Player => if self.player_slot == 0 { GREEN } else { YELLOW },
+            // Как в оригинале: P1 — жёлтый, P2 — зелёный.
+            Team::Player => if self.player_slot == 0 { YELLOW } else { GREEN },
             Team::Enemy => {
                 if self.frozen {
                     SKYBLUE
