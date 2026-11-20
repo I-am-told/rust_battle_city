@@ -66,6 +66,8 @@ pub struct Tank {
     /// Точка, к которой танк плавно доезжает при повороте (режим Smooth).
     pub slide_target: Option<Vec2>,
     pub slide_speed: f32,
+    /// Пройденный путь в пикселях — для анимации гусениц.
+    pub odometer: f32,
 }
 
 impl Tank {
@@ -95,6 +97,7 @@ impl Tank {
             player_slot: 0,
             slide_target: None,
             slide_speed: 0.0,
+            odometer: 0.0,
         }
     }
 
@@ -402,6 +405,7 @@ impl Tank {
             self.pos + delta.normalize() * step
         };
         if self.is_clear_at_px(next, map, others, tile_size) {
+            self.odometer += (next - self.pos).length();
             self.pos = next;
             if next == target {
                 self.slide_target = None;
@@ -424,6 +428,7 @@ impl Tank {
 
         if self.is_clear_at_px(target, map, others, tile_size) {
             self.pos = target;
+            self.odometer += dist.abs();
             return;
         }
 
@@ -438,7 +443,8 @@ impl Tank {
                 break;
             }
         }
-        self.pos = self.pos + axis * moved;
+        self.pos += axis * moved;
+        self.odometer += moved;
     }
 
     pub fn try_fire(

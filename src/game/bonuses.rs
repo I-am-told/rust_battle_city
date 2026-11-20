@@ -8,7 +8,7 @@ pub fn apply_bonus(
     kind: BonusKind,
     player: &mut Tank,
     player_lives: &mut u32,
-    enemies: &mut Vec<Tank>,
+    enemies: &mut [Tank],
     map: &mut GameMap,
     freeze_timer: &mut f32,
     shovel_timer: &mut f32,
@@ -42,7 +42,7 @@ pub fn apply_bonus(
                     killed += 1;
                 }
             }
-            enemies.retain(|e| e.alive);
+            // Убитых не удаляем здесь: Game сам уберёт их и нарисует взрывы.
             println!("Grenade! Killed {} enemies", killed);
         }
         BonusKind::Timer => {

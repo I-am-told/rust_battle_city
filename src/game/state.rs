@@ -7,6 +7,7 @@ use crate::entities::tank::{Tank, Direction, TurnAssist};
 use crate::entities::bullet::Bullet;
 use crate::entities::spawner::EnemySpawner;
 use crate::entities::bonus::Bonus;
+use crate::entities::effects::{Effect, EffectKind};
 use crate::game::bonuses::apply_bonus;
 use crate::game::level::LevelConfig;
 use crate::game::hud;
@@ -49,6 +50,10 @@ pub struct Game {
 
     pub bullets: Vec<Bullet>,
     pub bonuses: Vec<Bonus>,
+    /// Взрывы.
+    pub effects: Vec<Effect>,
+    /// Взрыв штаба уже показан.
+    base_exploded: bool,
 
     pub freeze_timer: f32,
     pub shovel_timer: f32,
@@ -160,6 +165,8 @@ impl Game {
             spawner,
             bullets: Vec::new(),
             bonuses: Vec::new(),
+            effects: Vec::new(),
+            base_exploded: false,
             freeze_timer: 0.0,
             shovel_timer: 0.0,
             shovel_tiles: Vec::new(),
@@ -173,10 +180,19 @@ impl Game {
     }
 
     pub fn update(&mut self, dt: f32) {
-        if self.state != GameState::Playing || self.paused {
+        if self.paused {
+            return;
+        }
+        // Взрывы доигрываются и после GAME OVER / победы.
+        self.effects.retain_mut(|e| e.update(dt));
+        if self.state != GameState::Playing {
             return;
         }
         self.update_playing(dt);
+    }
+
+    fn explode(&mut self, center: Vec2, kind: EffectKind) {
+        self.effects.push(Effect::new(center, kind, self.tank_size));
     }
 
     /// Включить/выключить паузу. Работает только во время игры.
@@ -327,14 +343,36 @@ impl Game {
         }
 
         Bullet::resolve_mutual_destruction(&mut self.bullets);
+        // Маленький взрыв там, где пуля закончила путь (стена, край поля,
+        // танк, встречная пуля).
+        let pops: Vec<Vec2> = self
+            .bullets
+            .iter()
+            .filter(|b| !b.alive)
+            .map(|b| b.pos + vec2(b.size, b.size) / 2.0)
+            .collect();
+        for p in pops {
+            self.explode(p, EffectKind::Small);
+        }
         self.bullets.retain(|b| b.alive);
+
+        if self.map.base_destroyed && !self.base_exploded {
+            self.base_exploded = true;
+            if let Some(b) = self.map.base_origin {
+                let c = vec2(b.x as f32 + 1.0, b.y as f32 + 1.0) * self.tile_size;
+                self.explode(c, EffectKind::Big);
+            }
+        }
 
         let mut pending_bonuses: u32 = 0;
         for id in hit_ids {
             if let Some(p) = self.players.iter_mut().find(|p| p.tank.id == id) {
                 // Player::hit сам проверяет alive/invulnerable: вторая пуля
                 // в том же кадре ничего не делает.
-                p.hit();
+                if p.hit() {
+                    let c = p.tank.pos + vec2(p.tank.size, p.tank.size) / 2.0;
+                    self.effects.push(Effect::new(c, EffectKind::Big, self.tank_size));
+                }
             } else if let Some(e) = self.enemies.iter_mut().find(|e| e.id == id) {
                 let was_bonus = e.is_bonus;
                 e.take_hit();
@@ -360,6 +398,17 @@ impl Game {
             }
         }
 
+        // Большой взрыв на месте каждого уничтоженного врага
+        // (пулей или гранатой — граната убивает, а убираем здесь).
+        let booms: Vec<Vec2> = self
+            .enemies
+            .iter()
+            .filter(|e| !e.alive)
+            .map(|e| e.pos + vec2(e.size, e.size) / 2.0)
+            .collect();
+        for c in booms {
+            self.explode(c, EffectKind::Big);
+        }
         self.enemies.retain(|e| e.alive);
 
         for b in self.bonuses.iter_mut() {
@@ -434,6 +483,7 @@ impl Game {
         for b in self.bullets.iter() { b.draw(); }
         for e in self.enemies.iter() { e.draw(); }
         for p in self.players.iter() { p.tank.draw(); }
+        for fx in self.effects.iter() { fx.draw(); }
 
         match self.state {
             GameState::Victory => {

@@ -5,3 +5,4 @@ pub mod tank_render;
 pub mod bullet;
 pub mod spawner;
 pub mod bonus;
+pub mod effects;
