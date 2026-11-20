@@ -1,6 +1,6 @@
 use macroquad::prelude::*;
 use crate::config::Config;
-use crate::input::KeyBindings;
+use crate::input::{DirectionInput, KeyBindings};
 use crate::map::GameMap;
 use crate::entities::tank::{Tank, Direction};
 use crate::entities::bullet::Bullet;
@@ -26,6 +26,7 @@ pub struct Game {
     pub tile_size: f32,
     pub tank_size: f32,
     pub keys_p1: KeyBindings,
+    pub dir_input_p1: DirectionInput,
     pub bullet_speed: f32,
     pub bullet_size: f32,
     pub tank_speed: f32,
@@ -62,19 +63,21 @@ pub struct Game {
 }
 
 impl Game {
-    pub fn new(cfg: &Config) -> Self {
-        Self::new_with_progress(cfg, 1, 3, 0)
+    /// Клавиши разбираются один раз в main и передаются сюда,
+    /// чтобы предупреждения о кривых клавишах не повторялись каждый уровень.
+    pub fn new(cfg: &Config, keys_p1: KeyBindings) -> Self {
+        Self::new_with_progress(cfg, keys_p1, 1, 3, 0)
     }
 
     /// Создаёт игру на уровне `level`, с сохранением прогресса
     /// (жизни и ранг игрока переносятся между уровнями).
     pub fn new_with_progress(
         cfg: &Config,
+        keys_p1: KeyBindings,
         level: u32,
         player_lives: u32,
         player_rank: u8,
     ) -> Self {
-        let keys_p1: KeyBindings = (&cfg.player1_keys).into();
         let map = GameMap::new(cfg.grid_width, cfg.grid_height);
         let tank_size = cfg.tile_size * 2.0;
         // Скорости и размеры в конфиге — в тайлах; внутри игры — пиксели.
@@ -112,6 +115,7 @@ impl Game {
             tile_size: cfg.tile_size,
             tank_size,
             keys_p1,
+            dir_input_p1: DirectionInput::default(),
             bullet_speed: bullet_speed_px,
             bullet_size: bullet_size_px,
             tank_speed: tank_speed_px,
@@ -150,6 +154,13 @@ impl Game {
     pub fn toggle_pause(&mut self) {
         if self.state == GameState::Playing {
             self.paused = !self.paused;
+        }
+    }
+
+    /// Поставить на паузу (не снимает её). Работает только во время игры.
+    pub fn pause(&mut self) {
+        if self.state == GameState::Playing {
+            self.paused = true;
         }
     }
 
@@ -215,12 +226,13 @@ impl Game {
             .chain(self.enemies.iter().cloned())
             .collect();
 
-        self.player.update(dt, &self.keys_p1, &self.map, &snapshot, self.tile_size);
+        let desired = self.dir_input_p1.update(&self.keys_p1);
+        self.player.update(dt, desired, &self.map, &snapshot, self.tile_size);
         snapshot[0].pos = self.player.pos;
         snapshot[0].direction = self.player.direction;
 
         // Мёртвый игрок (ожидание возрождения) не стреляет.
-        if self.player.alive && is_key_pressed(self.keys_p1.fire) {
+        if self.player.alive && self.keys_p1.fire_pressed() {
             let active = self.bullets
                 .iter()
                 .filter(|b| b.alive && b.owner_id == self.player.id)
@@ -382,7 +394,8 @@ impl Game {
         let next_level = self.current_level + 1;
         let lives = self.player_lives;
         let rank = self.player.rank;
-        *self = Self::new_with_progress(cfg, next_level, lives, rank);
+        let keys = self.keys_p1.clone();
+        *self = Self::new_with_progress(cfg, keys, next_level, lives, rank);
     }
 
     pub fn draw(&self) {

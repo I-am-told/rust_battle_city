@@ -24,11 +24,34 @@
     bullet_size: 0.2,
 
     // Привязки клавиш для игрока 1.
+    // На действие можно задать одну клавишу ("W") или список (["W", "Up"]).
+    // Регистр не важен. Доступные имена:
+    //   буквы A..Z, цифры 0..9, стрелки Up/Down/Left/Right, F1..F12,
+    //   Space, Enter, Tab, Backspace, Escape, Insert, Delete, Home, End,
+    //   PageUp, PageDown, CapsLock,
+    //   цифровой блок Num0..Num9, NumEnter, NumPlus, NumMinus,
+    //   NumMultiply, NumDivide, NumDot,
+    //   LShift, RShift, LCtrl, RCtrl, LAlt, RAlt,
+    //   Minus, Equal, LeftBracket, RightBracket, Semicolon, Apostrophe,
+    //   Comma, Period, Slash, Backslash, Grave.
+    // Если зажаты два направления — танк едет по последнему нажатому.
     player1_keys: (
-        up:    "W",
-        down:  "S",
-        left:  "A",
-        right: "D",
-        fire:  "Space",
+        up:    ["W"],
+        down:  ["S"],
+        left:  ["A"],
+        right: ["D"],
+        fire:  ["Space"],
     ),
+
+    // Общие клавиши.
+    system_keys: (
+        // Пауза во время игры, следующий уровень, новая игра (как Start на Dandy).
+        start: ["Enter", "P"],
+        // Выход: короткое нажатие ставит паузу, удержание — выходит.
+        quit: ["Escape"],
+        // Сколько секунд держать клавишу выхода. 0 — выход сразу.
+        quit_hold_seconds: 2.0,
+    ),
+
+    // Любой параметр можно удалить из файла — будет взято значение по умолчанию.
 )

@@ -1,5 +1,4 @@
 use macroquad::prelude::*;
-use crate::input::KeyBindings;
 use crate::map::GameMap;
 use crate::entities::bullet::Bullet;
 use crate::entities::enemy_kind::EnemyKind;
@@ -216,7 +215,7 @@ impl Tank {
     pub fn update(
         &mut self,
         dt: f32,
-        keys: &KeyBindings,
+        desired: Option<Direction>,
         map: &GameMap,
         others: &[Tank],
         tile_size: f32,
@@ -224,12 +223,6 @@ impl Tank {
         if !self.alive { return; }
 
         self.prev_pos = self.pos;
-
-        let mut desired: Option<Direction> = None;
-        if is_key_down(keys.up)    { desired = Some(Direction::Up); }
-        if is_key_down(keys.down)  { desired = Some(Direction::Down); }
-        if is_key_down(keys.left)  { desired = Some(Direction::Left); }
-        if is_key_down(keys.right) { desired = Some(Direction::Right); }
 
         let desired = match desired {
             Some(d) => d,
