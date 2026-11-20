@@ -1,5 +1,6 @@
 use macroquad::prelude::*;
 use crate::entities::tank::{Tank, Direction};
+use crate::game::level::LevelConfig;
 
 pub struct EnemySpawner {
     pub spawn_interval: f32,
@@ -11,20 +12,22 @@ pub struct EnemySpawner {
     next_id: u32,
     spawned_count: u32,
     spawn_points: Vec<IVec2>,
+    level: LevelConfig,
 }
 
 impl EnemySpawner {
-    pub fn new(total_enemies: u32, max_on_field: u32, grid_width: i32) -> Self {
+    pub fn new(level: LevelConfig, grid_width: i32) -> Self {
         Self {
-            spawn_interval: 3.0,
+            spawn_interval: level.spawn_interval,
             retry_interval: 0.5,
             timer: 1.5,
             next_point: 0,
-            remaining_to_spawn: total_enemies,
-            max_on_field,
+            remaining_to_spawn: level.total_enemies,
+            max_on_field: level.max_on_field,
             next_id: 1,
             spawned_count: 0,
             spawn_points: Self::compute_spawn_points(grid_width),
+            level,
         }
     }
 
@@ -33,7 +36,6 @@ impl EnemySpawner {
         let right_x = (grid_width - 2).max(left_x);
         let center_x = ((grid_width - 2) / 2).max(left_x).min(right_x);
         let y = 0;
-
         vec![
             ivec2(left_x, y),
             ivec2(center_x, y),
@@ -41,8 +43,6 @@ impl EnemySpawner {
         ]
     }
 
-    /// Публичный доступ к точкам спавна — чтобы другие системы
-    /// (например, генератор бонусов) могли их исключать.
     pub fn spawn_points(&self) -> &[IVec2] {
         &self.spawn_points
     }
@@ -54,7 +54,7 @@ impl EnemySpawner {
         all_tanks: &[Tank],
         tile_size: f32,
         tank_size: f32,
-        tank_speed: f32,
+        base_enemy_speed: f32,
     ) -> Option<Tank> {
         if self.remaining_to_spawn == 0 {
             return None;
@@ -86,21 +86,22 @@ impl EnemySpawner {
         self.spawned_count += 1;
         let is_bonus = self.spawned_count % 4 == 0;
 
+        let kind = self.level.pick_kind();
+
         Some(Tank::new_enemy(
             pos,
             Direction::Down,
             tank_size,
-            tank_speed,
+            base_enemy_speed,
             id,
             is_bonus,
+            kind,
         ))
     }
 
     fn point_occupied_by_tank(pos: Vec2, tank_size: f32, tanks: &[Tank]) -> bool {
         for t in tanks {
-            if !t.alive {
-                continue;
-            }
+            if !t.alive { continue; }
             let dx = (t.pos.x - pos.x).abs();
             let dy = (t.pos.y - pos.y).abs();
             if dx < tank_size && dy < tank_size {

@@ -1,27 +1,28 @@
 use macroquad::prelude::*;
 use crate::entities::tank::{Tank, Team};
+use crate::entities::enemy_kind::EnemyKind;
 
 impl Tank {
     pub fn draw(&self) {
         if !self.alive { return; }
 
-        // Мигание при неуязвимости.
         if self.invulnerable {
             let phase = ((get_time() * 10.0) as i32) % 2;
             if phase != 0 { return; }
         }
 
-        // Цвет корпуса: замороженные враги — голубые.
+        // Цвет корпуса по типу.
         let color = match self.team {
             Team::Player => GREEN,
             Team::Enemy => {
                 if self.frozen {
                     SKYBLUE
                 } else if self.is_bonus {
+                    // Бонусный мигает фиолетовым поверх базового цвета.
                     let phase = ((get_time() * 5.0) as i32) % 2;
-                    if phase == 0 { PURPLE } else { RED }
+                    if phase == 0 { PURPLE } else { self.base_enemy_color() }
                 } else {
-                    RED
+                    self.base_enemy_color()
                 }
             }
         };
@@ -49,6 +50,31 @@ impl Tank {
                 let cx = start_x + i as f32 * (2.0 * r + gap) + r;
                 draw_circle(cx, y, r, WHITE);
             }
+        }
+
+        // Индикатор HP у врагов с max_hp > 1 (бронированный).
+        // Рисуем маленькие точки внизу танка: сколько осталось HP.
+        if self.team == Team::Enemy && self.max_hp > 1 {
+            let hp = self.hp.min(self.max_hp);
+            let r = self.size * 0.07;
+            let gap = self.size * 0.06;
+            let total_w = hp as f32 * (2.0 * r) + (hp as f32 - 1.0) * gap;
+            let start_x = self.pos.x + (self.size - total_w) / 2.0;
+            let y = self.pos.y + self.size - self.size * 0.12;
+            for i in 0..hp {
+                let cx = start_x + i as f32 * (2.0 * r + gap) + r;
+                draw_circle(cx, y, r, WHITE);
+            }
+        }
+    }
+
+    fn base_enemy_color(&self) -> Color {
+        match self.kind {
+            Some(EnemyKind::Basic)   => RED,
+            Some(EnemyKind::Fast)    => ORANGE,
+            Some(EnemyKind::Power)   => LIME,
+            Some(EnemyKind::Armored) => DARKGRAY,
+            None => RED,
         }
     }
 }

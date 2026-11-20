@@ -7,6 +7,7 @@ use crate::entities::bullet::Bullet;
 use crate::entities::spawner::EnemySpawner;
 use crate::entities::bonus::Bonus;
 use crate::game::bonuses::apply_bonus;
+use crate::game::level::LevelConfig;
 
 pub const BONUS_LIFETIME: f32 = 15.0;
 pub const MAX_RANK: u8 = 3;
@@ -24,9 +25,9 @@ pub struct Game {
     pub keys_p1: KeyBindings,
     pub bullet_speed: f32,
     pub bullet_size: f32,
+    pub tank_speed: f32,
 
     pub map: GameMap,
-
     pub player: Tank,
     pub player_spawn: Vec2,
     pub player_spawn_tile: IVec2,
@@ -46,10 +47,26 @@ pub struct Game {
 
     pub state: GameState,
     pub picked_bonuses: u32,
+    /// Текущий уровень (1-based). При победе увеличивается.
+    pub current_level: u32,
+    /// Конфиг (нужен для пересоздания карты/спавнера при переходе на след. уровень).
+    pub cfg_grid_width: i32,
+    pub cfg_grid_height: i32,
 }
 
 impl Game {
     pub fn new(cfg: &Config) -> Self {
+        Self::new_with_progress(cfg, 1, 3, 0)
+    }
+
+    /// Создаёт игру на уровне `level`, с сохранением прогресса
+    /// (жизни и ранг игрока переносятся между уровнями).
+    pub fn new_with_progress(
+        cfg: &Config,
+        level: u32,
+        player_lives: u32,
+        player_rank: u8,
+    ) -> Self {
         let keys_p1: KeyBindings = (&cfg.player1_keys).into();
         let map = GameMap::new(cfg.grid_width, cfg.grid_height);
         let tank_size = cfg.tile_size * 2.0;
@@ -75,7 +92,10 @@ impl Game {
             cfg.tank_speed,
         );
         player.id = 0;
-        player.apply_rank(0);
+        player.apply_rank(player_rank);
+
+        let level_cfg = LevelConfig::for_level(level);
+        let spawner = EnemySpawner::new(level_cfg, cfg.grid_width);
 
         Self {
             tile_size: cfg.tile_size,
@@ -83,15 +103,16 @@ impl Game {
             keys_p1,
             bullet_speed: cfg.bullet_speed,
             bullet_size: cfg.bullet_size,
+            tank_speed: cfg.tank_speed,
             map,
             player,
             player_spawn,
             player_spawn_tile,
-            player_lives: 3,
+            player_lives,
             respawn_timer: 0.0,
             invuln_timer: 0.0,
             enemies: Vec::new(),
-            spawner: EnemySpawner::new(30, 3, cfg.grid_width),
+            spawner,
             bullets: Vec::new(),
             bonuses: Vec::new(),
             freeze_timer: 0.0,
@@ -99,6 +120,9 @@ impl Game {
             shovel_tiles: Vec::new(),
             state: GameState::Playing,
             picked_bonuses: 0,
+            current_level: level,
+            cfg_grid_width: cfg.grid_width,
+            cfg_grid_height: cfg.grid_height,
         }
     }
 
@@ -109,7 +133,6 @@ impl Game {
         self.update_playing(dt);
     }
 
-    /// Занята ли область спавна игрока живым врагом.
     fn player_spawn_occupied(&self) -> bool {
         let px = self.player_spawn.x;
         let py = self.player_spawn.y;
@@ -136,7 +159,6 @@ impl Game {
             self.respawn_timer -= dt;
             if self.respawn_timer <= 0.0 {
                 if self.player_spawn_occupied() {
-                    // Точка занята — ждём ещё немного.
                     self.respawn_timer = 0.2;
                 } else {
                     self.player.pos = self.player_spawn;
@@ -252,10 +274,11 @@ impl Game {
                     }
                 }
             } else if let Some(e) = self.enemies.iter_mut().find(|e| e.id == id) {
-                if e.is_bonus {
+                let was_bonus = e.is_bonus;
+                e.take_hit();
+                if !e.alive && was_bonus {
                     pending_bonuses += 1;
                 }
-                e.take_hit();
             }
         }
 
@@ -309,6 +332,14 @@ impl Game {
         }
     }
 
+    /// Переход на следующий уровень: жизни и ранг сохраняются.
+    pub fn advance_level(&mut self, cfg: &Config) {
+        let next_level = self.current_level + 1;
+        let lives = self.player_lives;
+        let rank = self.player.rank;
+        *self = Self::new_with_progress(cfg, next_level, lives, rank);
+    }
+
     pub fn draw(&self) {
         clear_background(BLACK);
 
@@ -340,7 +371,7 @@ impl Game {
                     fs as f32,
                     GREEN,
                 );
-                let hint = "Press ENTER for new game";
+                let hint = "Press ENTER for next level";
                 let hfs = 24;
                 let hdims = measure_text(hint, None, hfs, 1.0);
                 draw_text(
@@ -379,9 +410,16 @@ impl Game {
         set_default_camera();
 
         draw_text(
-            &format!("LIVES: {}", self.player_lives),
+            &format!("LEVEL: {}", self.current_level),
             10.0,
             24.0,
+            24.0,
+            WHITE,
+        );
+        draw_text(
+            &format!("LIVES: {}", self.player_lives),
+            10.0,
+            48.0,
             24.0,
             WHITE,
         );
@@ -392,21 +430,21 @@ impl Game {
                 self.spawner.remaining_to_spawn
             ),
             10.0,
-            48.0,
+            72.0,
             20.0,
             LIGHTGRAY,
         );
         draw_text(
             &format!("BONUSES PICKED: {}", self.picked_bonuses),
             10.0,
-            72.0,
+            96.0,
             20.0,
             LIGHTGRAY,
         );
         draw_text(
             &format!("RANK: {}", self.player.rank),
             10.0,
-            96.0,
+            120.0,
             20.0,
             LIGHTGRAY,
         );
@@ -415,7 +453,7 @@ impl Game {
             draw_text(
                 &format!("FREEZE: {:.1}s", self.freeze_timer),
                 10.0,
-                120.0,
+                144.0,
                 20.0,
                 SKYBLUE,
             );
@@ -424,7 +462,7 @@ impl Game {
             draw_text(
                 &format!("SHOVEL: {:.1}s", self.shovel_timer),
                 10.0,
-                144.0,
+                168.0,
                 20.0,
                 ORANGE,
             );

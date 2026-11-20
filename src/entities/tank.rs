@@ -2,6 +2,7 @@ use macroquad::prelude::*;
 use crate::input::KeyBindings;
 use crate::map::GameMap;
 use crate::entities::bullet::Bullet;
+use crate::entities::enemy_kind::EnemyKind;
 
 pub use crate::entities::direction::Direction;
 
@@ -14,6 +15,8 @@ pub enum Team {
 #[derive(Clone)]
 pub struct Tank {
     pub pos: Vec2,
+    /// Позиция на начало кадра — для отката при коллизии танк-танк.
+    pub prev_pos: Vec2,
     pub direction: Direction,
     pub size: f32,
     pub speed: f32,
@@ -24,13 +27,12 @@ pub struct Tank {
     pub alive: bool,
     pub invulnerable: bool,
     pub is_bonus: bool,
-    /// Заморожен ли танк (бонус "таймер"). Пока true — не двигается и не стреляет.
     pub frozen: bool,
-    /// Ранг танка (для игрока).
     pub rank: u8,
-    /// Множитель скорости пули. 1.0 — базовая, 1.5 — на ранге 1+.
     pub bullet_speed_multiplier: f32,
-    // --- ИИ ---
+    pub kind: Option<EnemyKind>,
+    pub hp: u8,
+    pub max_hp: u8,
     pub ai_dir_timer: f32,
     pub ai_shoot_timer: f32,
 }
@@ -39,6 +41,7 @@ impl Tank {
     pub fn new(pos: Vec2, direction: Direction, size: f32, speed: f32) -> Self {
         Self {
             pos,
+            prev_pos: pos,
             direction,
             size,
             speed,
@@ -52,6 +55,9 @@ impl Tank {
             frozen: false,
             rank: 0,
             bullet_speed_multiplier: 1.0,
+            kind: None,
+            hp: 1,
+            max_hp: 1,
             ai_dir_timer: 0.0,
             ai_shoot_timer: 0.0,
         }
@@ -61,14 +67,19 @@ impl Tank {
         pos: Vec2,
         direction: Direction,
         size: f32,
-        speed: f32,
+        base_speed: f32,
         id: u32,
         is_bonus: bool,
+        kind: EnemyKind,
     ) -> Self {
-        let mut t = Self::new(pos, direction, size, speed);
+        let mut t = Self::new(pos, direction, size, base_speed * kind.speed_mult());
         t.team = Team::Enemy;
         t.id = id;
         t.is_bonus = is_bonus;
+        t.kind = Some(kind);
+        t.hp = kind.max_hp();
+        t.max_hp = kind.max_hp();
+        t.bullet_speed_multiplier = kind.bullet_speed_mult();
         t.ai_dir_timer = 0.0;
         t.ai_shoot_timer = 1.0;
         t
@@ -103,7 +114,10 @@ impl Tank {
     pub fn take_hit(&mut self) {
         if !self.alive { return; }
         if self.invulnerable { return; }
-        self.alive = false;
+        self.hp = self.hp.saturating_sub(1);
+        if self.hp == 0 {
+            self.alive = false;
+        }
     }
 
     fn tile_origin(&self, tile_size: f32) -> IVec2 {
@@ -195,6 +209,8 @@ impl Tank {
     ) {
         if !self.alive { return; }
 
+        self.prev_pos = self.pos;
+
         let mut desired: Option<Direction> = None;
         if is_key_down(keys.up)    { desired = Some(Direction::Up); }
         if is_key_down(keys.down)  { desired = Some(Direction::Down); }
@@ -227,10 +243,11 @@ impl Tank {
         if !self.alive {
             return None;
         }
-        // Замороженный враг не двигается и не стреляет.
         if self.frozen {
             return None;
         }
+
+        self.prev_pos = self.pos;
 
         self.ai_dir_timer -= dt;
 
@@ -251,7 +268,7 @@ impl Tank {
 
         self.ai_shoot_timer -= dt;
         if self.ai_shoot_timer <= 0.0 {
-            self.ai_shoot_timer = 1.5 + rand::gen_range(0.0, 1.5);
+            self.ai_shoot_timer = 0.3 + rand::gen_range(0.0, 1.2);
             return self.try_fire(active_bullets, map, tile_size, bullet_speed, bullet_size);
         }
 

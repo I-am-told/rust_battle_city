@@ -23,9 +23,19 @@ async fn main() {
         let dt = get_frame_time();
         if is_key_pressed(KeyCode::Escape) { break; }
 
-        // Рестарт по Enter после конца игры.
-        if game.state != GameState::Playing && is_key_pressed(KeyCode::Enter) {
-            game = Game::new(&cfg);
+        // Enter после конца:
+        // - Victory → следующий уровень (жизни и ранг сохраняются)
+        // - Defeat → новая игра с 1-го уровня
+        if is_key_pressed(KeyCode::Enter) {
+            match game.state {
+                GameState::Victory => {
+                    game.advance_level(&cfg);
+                }
+                GameState::Defeat => {
+                    game = Game::new(&cfg);
+                }
+                GameState::Playing => {}
+            }
         }
 
         game.update(dt);
