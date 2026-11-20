@@ -16,7 +16,8 @@ use crate::levels::LevelSet;
 use std::rc::Rc;
 
 pub const BONUS_LIFETIME: f32 = 15.0;
-pub const MAX_RANK: u8 = 3;
+/// Максимальный ранг игрока (см. Tank::apply_rank).
+pub const MAX_RANK: u8 = 4;
 /// Сколько секунд игра продолжается после гибели последнего врага
 /// (как в оригинале — можно успеть подобрать бонус).
 pub const VICTORY_DELAY: f32 = 5.0;

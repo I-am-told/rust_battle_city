@@ -28,6 +28,9 @@ impl TurnAssist {
     }
 }
 
+/// Во сколько раз быстрее танк на 4-м ранге.
+pub const RANK4_SPEED_MULT: f32 = 1.3;
+
 /// За сколько секунд (не дольше) танк доезжает до точки поворота в режиме Smooth.
 pub const TURN_SLIDE_TIME: f32 = 0.1;
 
@@ -45,6 +48,8 @@ pub struct Tank {
     pub direction: Direction,
     pub size: f32,
     pub speed: f32,
+    /// Скорость без бонусов ранга (ранг 4 ускоряет танк относительно неё).
+    pub base_speed: f32,
     pub max_active_bullets: u8,
     pub id: u32,
     pub pierces_steel: bool,
@@ -78,6 +83,7 @@ impl Tank {
             direction,
             size,
             speed,
+            base_speed: speed,
             max_active_bullets: 1,
             id: 0,
             pierces_steel: false,
@@ -123,8 +129,12 @@ impl Tank {
         t
     }
 
+    /// Ранг игрока (звёзды):
+    /// 0 — одна пуля; 1 — быстрые пули; 2 — две пули;
+    /// 3 — пули пробивают сталь; 4 — всё это и танк быстрее на 30%.
     pub fn apply_rank(&mut self, rank: u8) {
         self.rank = rank;
+        self.speed = if rank >= 4 { self.base_speed * RANK4_SPEED_MULT } else { self.base_speed };
         match rank {
             0 => {
                 self.max_active_bullets = 1;

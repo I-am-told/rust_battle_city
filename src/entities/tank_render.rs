@@ -64,6 +64,8 @@ struct Look {
     wedge: bool,
     /// Дульный тормоз на конце ствола (мощный танк).
     muzzle: bool,
+    /// Гоночные полосы на корпусе и выхлопные трубы (ранг 4 — быстрый).
+    racer: bool,
 }
 
 fn look_for(tank: &Tank) -> Look {
@@ -75,13 +77,32 @@ fn look_for(tank: &Tank) -> Look {
         plates: false,
         wedge: false,
         muzzle: false,
+        racer: false,
     };
     match tank.kind {
         Some(EnemyKind::Fast) => Look { hull_inset: 0.25, turret_r: 0.15, barrel_w: 0.09, wedge: true, ..base },
         Some(EnemyKind::Power) => Look { barrel_w: 0.15, barrel_tip: 0.0, muzzle: true, ..base },
         Some(EnemyKind::Armored) => Look { hull_inset: 0.17, turret_r: 0.23, barrel_w: 0.14, plates: true, ..base },
-        // У игрока ствол толще с ростом ранга.
-        _ => Look { barrel_w: 0.12 + 0.015 * tank.rank as f32, ..base },
+        // Игрок меняется с каждой звездой:
+        // 0 — лёгкий танк;
+        // 1 — длинный ствол с дульным тормозом (быстрые пули);
+        // 2 — бронеплиты и башня крупнее (две пули);
+        // 3 — тяжёлый: шире корпус, толстый ствол (пробивает сталь);
+        // 4 — тяжёлый + гоночные полосы и выхлоп (быстрее ездит).
+        None => match tank.rank {
+            0 => base,
+            1 => Look { barrel_w: 0.13, barrel_tip: 0.0, muzzle: true, ..base },
+            2 => Look { barrel_w: 0.14, barrel_tip: 0.0, muzzle: true, plates: true, turret_r: 0.21, ..base },
+            3 => Look {
+                hull_inset: 0.16, turret_r: 0.23, barrel_w: 0.16, barrel_tip: 0.0,
+                muzzle: true, plates: true, ..base
+            },
+            _ => Look {
+                hull_inset: 0.16, turret_r: 0.23, barrel_w: 0.16, barrel_tip: 0.0,
+                muzzle: true, plates: true, racer: true, ..base
+            },
+        },
+        _ => base,
     }
 }
 
@@ -178,6 +199,22 @@ impl Tank {
         if look.plates {
             pen.rect(hx - 0.02, 0.3, 0.08, 0.4, light);
             pen.rect(1.0 - hx - 0.06, 0.3, 0.08, 0.4, light);
+        }
+
+        if look.racer {
+            // Две гоночные полосы вдоль корпуса.
+            let stripe = Color::new(0.85, 0.1, 0.1, 1.0);
+            pen.rect(0.36, hy + 0.05, 0.07, hh - 0.12, stripe);
+            pen.rect(0.57, hy + 0.05, 0.07, hh - 0.12, stripe);
+            // Выхлопные трубы сзади; когда танк едет — пламя.
+            pen.rect(hx + 0.06, 0.88, 0.1, 0.08, darker);
+            pen.rect(1.0 - hx - 0.16, 0.88, 0.1, 0.08, darker);
+            let moving = (self.pos - self.prev_pos).length_squared() > 0.0001;
+            if moving && ((get_time() * 16.0) as i32) % 2 == 0 {
+                let fire = Color::new(1.0, 0.6, 0.1, 0.9);
+                pen.rect(hx + 0.07, 0.96, 0.08, 0.04, fire);
+                pen.rect(1.0 - hx - 0.15, 0.96, 0.08, 0.04, fire);
+            }
         }
 
         // Ствол (под башней, чтобы башня перекрыла основание).
