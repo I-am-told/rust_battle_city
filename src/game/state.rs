@@ -11,6 +11,9 @@ use crate::game::level::LevelConfig;
 
 pub const BONUS_LIFETIME: f32 = 15.0;
 pub const MAX_RANK: u8 = 3;
+/// Сколько секунд игра продолжается после гибели последнего врага
+/// (как в оригинале — можно успеть подобрать бонус).
+pub const VICTORY_DELAY: f32 = 5.0;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum GameState {
@@ -46,6 +49,10 @@ pub struct Game {
     pub shovel_tiles: Vec<IVec2>,
 
     pub state: GameState,
+    /// Пауза (только в состоянии Playing).
+    pub paused: bool,
+    /// Обратный отсчёт до экрана победы; None — враги ещё есть.
+    pub victory_timer: Option<f32>,
     pub picked_bonuses: u32,
     /// Текущий уровень (1-based). При победе увеличивается.
     pub current_level: u32,
@@ -123,6 +130,8 @@ impl Game {
             shovel_timer: 0.0,
             shovel_tiles: Vec::new(),
             state: GameState::Playing,
+            paused: false,
+            victory_timer: None,
             picked_bonuses: 0,
             current_level: level,
             cfg_grid_width: cfg.grid_width,
@@ -131,10 +140,17 @@ impl Game {
     }
 
     pub fn update(&mut self, dt: f32) {
-        if self.state != GameState::Playing {
+        if self.state != GameState::Playing || self.paused {
             return;
         }
         self.update_playing(dt);
+    }
+
+    /// Включить/выключить паузу. Работает только во время игры.
+    pub fn toggle_pause(&mut self) {
+        if self.state == GameState::Playing {
+            self.paused = !self.paused;
+        }
     }
 
     fn player_spawn_occupied(&self) -> bool {
@@ -281,6 +297,8 @@ impl Game {
                 // вторая не должна отнимать ещё одну жизнь.
                 if self.player.alive && !self.player.invulnerable {
                     self.player.take_hit();
+                    // Как в оригинале: после гибели ранг (звёзды) сбрасывается.
+                    self.player.apply_rank(0);
                     self.player_lives = self.player_lives.saturating_sub(1);
                     if self.player_lives == 0 {
                         self.state = GameState::Defeat;
@@ -340,10 +358,22 @@ impl Game {
 
         self.bonuses.retain(|b| b.alive);
 
+        // Поражение по жизням могло выставиться выше в этом же кадре —
+        // тогда победу не проверяем, чтобы не перезаписать Defeat.
+        if self.state != GameState::Playing {
+            return;
+        }
         if self.map.base_destroyed {
             self.state = GameState::Defeat;
         } else if self.spawner.remaining_to_spawn == 0 && self.enemies.is_empty() {
-            self.state = GameState::Victory;
+            // Враги кончились — игра идёт ещё VICTORY_DELAY секунд, потом победа.
+            // Поражение в это время (база, последняя жизнь) всё ещё возможно —
+            // оно выставляется выше и раньше.
+            let t = self.victory_timer.get_or_insert(VICTORY_DELAY);
+            *t -= dt;
+            if *t <= 0.0 {
+                self.state = GameState::Victory;
+            }
         }
     }
 
@@ -419,7 +449,23 @@ impl Game {
                     LIGHTGRAY,
                 );
             }
-            GameState::Playing => {}
+            GameState::Playing => {
+                if self.paused {
+                    // Мигающая надпись, как в оригинале.
+                    if ((get_time() * 2.0) as i32) % 2 == 0 {
+                        let text = "PAUSE";
+                        let fs = 64;
+                        let dims = measure_text(text, None, fs, 1.0);
+                        draw_text(
+                            text,
+                            playfield_w / 2.0 - dims.width / 2.0,
+                            playfield_h / 2.0,
+                            fs as f32,
+                            RED,
+                        );
+                    }
+                }
+            }
         }
 
         set_default_camera();

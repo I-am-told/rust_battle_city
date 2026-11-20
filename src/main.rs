@@ -32,6 +32,7 @@ async fn main() {
         let dt = get_frame_time();
         if is_key_pressed(KeyCode::Escape) { break; }
 
+        // Enter во время игры — пауза (также клавиша P).
         // Enter после конца:
         // - Victory → следующий уровень (жизни и ранг сохраняются)
         // - Defeat → новая игра с 1-го уровня
@@ -43,8 +44,11 @@ async fn main() {
                 GameState::Defeat => {
                     game = Game::new(&cfg);
                 }
-                GameState::Playing => {}
+                // Во время игры Enter — пауза (как Start на Dandy).
+                GameState::Playing => game.toggle_pause(),
             }
+        } else if is_key_pressed(KeyCode::P) {
+            game.toggle_pause();
         }
 
         game.update(dt);
