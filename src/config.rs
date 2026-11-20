@@ -86,6 +86,8 @@ pub struct Config {
     pub bullet_speed: f32,
     /// Размер снаряда, в тайлах.
     pub bullet_size: f32,
+    /// Помощь при повороте: "off" | "jump" | "smooth".
+    pub turn_assist: String,
     pub player1_keys: PlayerKeys,
     pub system_keys: SystemKeys,
 }
@@ -100,6 +102,7 @@ impl Default for Config {
             tank_speed: 4.0,
             bullet_speed: 10.0,
             bullet_size: 0.2,
+            turn_assist: "smooth".into(),
             player1_keys: PlayerKeys::default(),
             system_keys: SystemKeys::default(),
         }

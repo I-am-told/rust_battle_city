@@ -2,7 +2,7 @@ use macroquad::prelude::*;
 use crate::config::Config;
 use crate::input::{DirectionInput, KeyBindings};
 use crate::map::GameMap;
-use crate::entities::tank::{Tank, Direction};
+use crate::entities::tank::{Tank, Direction, TurnAssist};
 use crate::entities::bullet::Bullet;
 use crate::entities::spawner::EnemySpawner;
 use crate::entities::bonus::Bonus;
@@ -106,6 +106,13 @@ impl Game {
             tank_speed_px,
         );
         player.id = 0;
+        player.turn_assist = TurnAssist::parse(&cfg.turn_assist).unwrap_or_else(|| {
+            eprintln!(
+                "Неизвестный turn_assist '{}' (варианты: off, jump, smooth) — беру smooth.",
+                cfg.turn_assist
+            );
+            TurnAssist::Smooth
+        });
         player.apply_rank(player_rank);
 
         let level_cfg = LevelConfig::for_level(level);
@@ -193,6 +200,7 @@ impl Game {
                     self.respawn_timer = 0.2;
                 } else {
                     self.player.pos = self.player_spawn;
+                    self.player.slide_target = None;
                     self.player.direction = Direction::Up;
                     self.player.alive = true;
                     self.player.invulnerable = true;

@@ -5,6 +5,32 @@ use crate::entities::enemy_kind::EnemyKind;
 
 pub use crate::entities::direction::Direction;
 
+/// Помощь при повороте (для игрока). Задаётся в config.ron: `turn_assist`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum TurnAssist {
+    /// Как в оригинале: при повороте танк выравнивается до ближайшего тайла.
+    Off,
+    /// Если в новую сторону не проехать, а через тайл впереди можно —
+    /// танк мгновенно переносится на этот тайл и поворачивает.
+    Jump,
+    /// То же, что Jump, но танк доезжает до точки поворота плавно.
+    Smooth,
+}
+
+impl TurnAssist {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "off" => Some(TurnAssist::Off),
+            "jump" => Some(TurnAssist::Jump),
+            "smooth" => Some(TurnAssist::Smooth),
+            _ => None,
+        }
+    }
+}
+
+/// За сколько секунд (не дольше) танк доезжает до точки поворота в режиме Smooth.
+pub const TURN_SLIDE_TIME: f32 = 0.1;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Team {
     Player,
@@ -34,6 +60,10 @@ pub struct Tank {
     pub max_hp: u8,
     pub ai_dir_timer: f32,
     pub ai_shoot_timer: f32,
+    pub turn_assist: TurnAssist,
+    /// Точка, к которой танк плавно доезжает при повороте (режим Smooth).
+    pub slide_target: Option<Vec2>,
+    pub slide_speed: f32,
 }
 
 impl Tank {
@@ -59,6 +89,9 @@ impl Tank {
             max_hp: 1,
             ai_dir_timer: 0.0,
             ai_shoot_timer: 0.0,
+            turn_assist: TurnAssist::Off,
+            slide_target: None,
+            slide_speed: 0.0,
         }
     }
 
@@ -224,6 +257,13 @@ impl Tank {
 
         self.prev_pos = self.pos;
 
+        // Плавное выравнивание при повороте: пока танк доезжает,
+        // ввод не обрабатываем (это ~0.1 с).
+        if self.slide_target.is_some() {
+            self.continue_slide(dt, map, others, tile_size);
+            return;
+        }
+
         let desired = match desired {
             Some(d) => d,
             None => return,
@@ -317,28 +357,68 @@ impl Tank {
     }
 
     fn turn_to(&mut self, new_dir: Direction, map: &GameMap, others: &[Tank], tile_size: f32) {
-        self.snap_to_grid(tile_size);
-        let origin = self.tile_origin(tile_size);
-
-        if self.is_clear_at_grid(origin + new_dir.vector(), map, others, tile_size) {
+        // Разворот на 180° — без выравнивания: танк остаётся на своей оси.
+        if new_dir == self.direction.opposite() {
             self.direction = new_dir;
             return;
         }
 
-        let old_origin = origin + self.direction.vector();
-        if self.is_clear_at_grid(old_origin, map, others, tile_size) {
-            let check_origin = old_origin + new_dir.vector();
-            if self.is_clear_at_grid(check_origin, map, others, tile_size) {
-                self.pos = vec2(
-                    old_origin.x as f32 * tile_size,
-                    old_origin.y as f32 * tile_size,
-                );
-                self.direction = new_dir;
-                return;
+        // Ближайшая точка сетки (как в оригинале).
+        let snapped = vec2(
+            (self.pos.x / tile_size).round() * tile_size,
+            (self.pos.y / tile_size).round() * tile_size,
+        );
+        let origin = ivec2(
+            (snapped.x / tile_size).round() as i32,
+            (snapped.y / tile_size).round() as i32,
+        );
+
+        let mut target = snapped;
+        if self.turn_assist != TurnAssist::Off
+            && !self.is_clear_at_grid(origin + new_dir.vector(), map, others, tile_size)
+        {
+            // В новую сторону не проехать. Если через тайл впереди поворот
+            // свободен — поворачиваем там (помощь, чтобы легче «попадать»).
+            let ahead = origin + self.direction.vector();
+            if self.is_clear_at_grid(ahead, map, others, tile_size)
+                && self.is_clear_at_grid(ahead + new_dir.vector(), map, others, tile_size)
+            {
+                target = vec2(ahead.x as f32 * tile_size, ahead.y as f32 * tile_size);
             }
         }
 
         self.direction = new_dir;
+
+        if self.turn_assist == TurnAssist::Smooth {
+            let dist = (target - self.pos).length();
+            if dist > 0.01 {
+                self.slide_target = Some(target);
+                self.slide_speed = (dist / TURN_SLIDE_TIME).max(self.speed);
+            }
+        } else {
+            self.pos = target;
+        }
+    }
+
+    /// Шаг плавного выравнивания. Если путь перекрыли (другой танк) —
+    /// выравнивание прерывается, танк остаётся где стоит.
+    fn continue_slide(&mut self, dt: f32, map: &GameMap, others: &[Tank], tile_size: f32) {
+        let Some(target) = self.slide_target else { return };
+        let delta = target - self.pos;
+        let step = self.slide_speed * dt;
+        let next = if delta.length() <= step {
+            target
+        } else {
+            self.pos + delta.normalize() * step
+        };
+        if self.is_clear_at_px(next, map, others, tile_size) {
+            self.pos = next;
+            if next == target {
+                self.slide_target = None;
+            }
+        } else {
+            self.slide_target = None;
+        }
     }
 
     fn move_along(
