@@ -28,6 +28,9 @@ impl TurnAssist {
     }
 }
 
+/// Сколько тайлов танк игрока проскальзывает по льду, если отпустить кнопку.
+pub const ICE_SLIDE_TILES: f32 = 1.0;
+
 /// Во сколько раз быстрее танк на 4-м ранге.
 pub const RANK4_SPEED_MULT: f32 = 1.3;
 
@@ -73,6 +76,8 @@ pub struct Tank {
     pub slide_speed: f32,
     /// Пройденный путь в пикселях — для анимации гусениц.
     pub odometer: f32,
+    /// Сколько пикселей ещё проскользить по льду (кнопку отпустили).
+    pub ice_glide: f32,
 }
 
 impl Tank {
@@ -104,6 +109,7 @@ impl Tank {
             slide_target: None,
             slide_speed: 0.0,
             odometer: 0.0,
+            ice_glide: 0.0,
         }
     }
 
@@ -267,9 +273,23 @@ impl Tank {
             return;
         }
 
+        let size = vec2(self.size, self.size);
         let desired = match desired {
             Some(d) => d,
-            None => return,
+            None => {
+                // Кнопку отпустили: на льду танк ещё немного скользит.
+                if self.ice_glide > 0.0 && map.on_ice(self.pos, size, tile_size) {
+                    let before = self.pos;
+                    let dist = (self.speed * dt).min(self.ice_glide);
+                    self.move_along(self.direction, dist, map, others, tile_size);
+                    let moved = (self.pos - before).length();
+                    // Упёрся — скольжение кончилось.
+                    self.ice_glide = if moved < dist * 0.5 { 0.0 } else { self.ice_glide - moved };
+                } else {
+                    self.ice_glide = 0.0;
+                }
+                return;
+            }
         };
 
         if desired != self.direction {
@@ -278,6 +298,12 @@ impl Tank {
 
         let dist = self.speed * dt;
         self.move_along(self.direction, dist, map, others, tile_size);
+        // Пока едем по льду — «запасаем» скольжение на случай, если отпустят.
+        self.ice_glide = if map.on_ice(self.pos, size, tile_size) {
+            ICE_SLIDE_TILES * tile_size
+        } else {
+            0.0
+        };
     }
 
     pub fn update_ai(

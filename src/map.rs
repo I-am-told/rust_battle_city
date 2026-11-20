@@ -7,6 +7,10 @@ pub enum Tile {
     Steel,
     Water,
     Eagle,
+    /// Лес: танки и пули проходят, деревья рисуются поверх танков.
+    Forest,
+    /// Лёд: проезжаемый, танк игрока на нём скользит.
+    Ice,
 }
 
 /// Во что попала пуля (для звука).
@@ -152,7 +156,7 @@ impl GameMap {
         }
         let idx = (tx + ty * self.width) as usize;
         match self.tiles[idx] {
-            Tile::Empty => false,
+            Tile::Empty | Tile::Forest | Tile::Ice => false,
             Tile::Brick => {
                 let bit = qx.rem_euclid(2) + 2 * qy.rem_euclid(2);
                 self.brick_mask[idx] & (1 << bit) != 0
@@ -173,6 +177,27 @@ impl GameMap {
             (pos.y / q).floor() as i32,
             ((pos.y + size.y - eps) / q).floor() as i32,
         )
+    }
+
+    /// Стоит ли прямоугольник (пиксели) хоть частью на льду.
+    pub fn on_ice(&self, pos: Vec2, size: Vec2, tile_size: f32) -> bool {
+        let eps = 0.001;
+        let x0 = (pos.x / tile_size).floor() as i32;
+        let x1 = ((pos.x + size.x - eps) / tile_size).floor() as i32;
+        let y0 = (pos.y / tile_size).floor() as i32;
+        let y1 = ((pos.y + size.y - eps) / tile_size).floor() as i32;
+        (y0..=y1).any(|y| (x0..=x1).any(|x| self.get_tile(x, y) == Tile::Ice))
+    }
+
+    /// Лес — рисовать ПОСЛЕ танков и пуль: под деревьями можно спрятаться.
+    pub fn draw_forest(&self, tile_size: f32) {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.get_tile(x, y) == Tile::Forest {
+                    draw_forest_tile(x, y, x as f32 * tile_size, y as f32 * tile_size, tile_size);
+                }
+            }
+        }
     }
 
     /// Задевает ли прямоугольник (пиксели) что-то твёрдое.
@@ -334,7 +359,9 @@ impl GameMap {
         for y in 0..(self.height - 1) {
             for x in 0..(self.width - 1) {
                 let all_empty = (0..2).all(|dy| {
-                    (0..2).all(|dx| self.get_tile(x + dx, y + dy) == Tile::Empty)
+                    (0..2).all(|dx| {
+                        matches!(self.get_tile(x + dx, y + dy), Tile::Empty | Tile::Forest | Tile::Ice)
+                    })
                 });
                 if !all_empty {
                     continue;
@@ -361,7 +388,9 @@ impl GameMap {
                 let py = y as f32 * tile_size;
 
                 match tile {
-                    Tile::Empty => {}
+                    // Лес рисуется отдельно, поверх танков (draw_forest).
+                    Tile::Empty | Tile::Forest => {}
+                    Tile::Ice => draw_ice_tile(px, py, tile_size),
                     Tile::Brick => {
                         let mask = self.brick_mask[(x + y * self.width) as usize];
                         draw_brick_tile(px, py, tile_size, mask);
@@ -507,5 +536,38 @@ fn draw_base_ruins(x: f32, y: f32, s: f32) {
         let k = ((t * 0.6 + i as f32 / 3.0) % 1.0).abs();
         let c = p(0.5 + 0.08 * (i as f32 - 1.0), 0.6 - 0.5 * k);
         draw_circle(c.x, c.y, s * (0.06 + 0.08 * k), Color::new(0.5, 0.5, 0.5, 0.6 * (1.0 - k)));
+    }
+}
+
+/// Лёд: бледно-голубая гладь с бликами по диагонали.
+fn draw_ice_tile(px: f32, py: f32, ts: f32) {
+    draw_rectangle(px, py, ts, ts, Color::new(0.72, 0.85, 0.95, 1.0));
+    let shine = Color::new(0.95, 0.98, 1.0, 1.0);
+    let line = (ts / 16.0).max(1.0);
+    // Короткие диагональные блики из ступенек.
+    for (sx, sy) in [(0.15, 0.55), (0.55, 0.15), (0.6, 0.7)] {
+        for k in 0..3 {
+            let k = k as f32;
+            draw_rectangle(px + (sx + 0.07 * k) * ts, py + (sy - 0.07 * k) * ts, ts * 0.08, line * 1.5, shine);
+        }
+    }
+    draw_rectangle(px, py + ts - line, ts, line, Color::new(0.6, 0.74, 0.86, 1.0));
+}
+
+/// Лес: кроны деревьев (по кроне на четвертинку тайла) с тенью и бликами.
+/// Соседние тайлы чуть различаются, чтобы лес не выглядел клеткой.
+fn draw_forest_tile(x: i32, y: i32, px: f32, py: f32, ts: f32) {
+    let q = ts / 2.0;
+    let dark = Color::new(0.05, 0.3, 0.08, 1.0);
+    let mid = Color::new(0.12, 0.5, 0.12, 1.0);
+    let light = Color::new(0.35, 0.72, 0.25, 1.0);
+    draw_rectangle(px, py, ts, ts, dark);
+    for i in 0..4 {
+        let cx = px + (i % 2) as f32 * q + q / 2.0;
+        let cy = py + (i / 2) as f32 * q + q / 2.0;
+        let jitter = (((x * 7 + y * 13 + i * 5) % 5) as f32 - 2.0) * q * 0.06;
+        draw_circle(cx + jitter, cy + q * 0.08, q * 0.62, dark);
+        draw_circle(cx + jitter, cy, q * 0.55, mid);
+        draw_circle(cx + jitter - q * 0.15, cy - q * 0.15, q * 0.22, light);
     }
 }

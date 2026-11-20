@@ -674,10 +674,12 @@ impl Game {
         hud::draw_frame(self.tile_size, self.map.width, self.map.height);
 
         self.map.draw(self.tile_size);
-        for b in self.bonuses.iter() { b.draw(); }
         for b in self.bullets.iter() { b.draw(); }
         for e in self.enemies.iter() { e.draw(); }
         for p in self.players.iter() { p.tank.draw(); }
+        // Лес поверх танков и пуль (как в оригинале), бонусы — поверх леса.
+        self.map.draw_forest(self.tile_size);
+        for b in self.bonuses.iter() { b.draw(); }
         // Звёздочки появления.
         let half = vec2(self.tank_size, self.tank_size) / 2.0;
         for (t, el) in self.pending.iter() {
