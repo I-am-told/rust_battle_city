@@ -50,11 +50,11 @@ async fn main() {
     }
     warn_conflicts(&all_keys, &sys);
 
-    let playfield_w = cfg.tile_size * cfg.grid_width as f32;
-    let playfield_h = cfg.tile_size * cfg.grid_height as f32;
-
+    // Окно = поле + рамка с панелью (как на Dandy). Размер окна можно
+    // менять мышью — пропорции сохраняются, лишнее место будет чёрным.
+    let frame = game::hud::frame_size(cfg.tile_size, cfg.grid_width, cfg.grid_height);
     let scale = if cfg.window_scale > 0.0 { cfg.window_scale } else { 1.0 };
-    request_new_screen_size(playfield_w * scale, playfield_h * scale);
+    request_new_screen_size(frame.x * scale, frame.y * scale);
 
     let mut screen = Screen::Menu(Menu::new(0, &keys_path));
     // Последний выбор в меню (после GAME OVER курсор стоит на нём).

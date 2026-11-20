@@ -8,6 +8,7 @@ use crate::entities::spawner::EnemySpawner;
 use crate::entities::bonus::Bonus;
 use crate::game::bonuses::apply_bonus;
 use crate::game::level::LevelConfig;
+use crate::game::hud;
 use crate::game::player::{Player, PLAYER_ID_BASE};
 
 pub const BONUS_LIFETIME: f32 = 15.0;
@@ -394,32 +395,16 @@ impl Game {
         *self = Self::new_with_progress(cfg, keys, next_level, self.lives, ranks);
     }
 
-    /// Строка рангов для HUD: "RANK: 2" или "RANK P1: 2  P2: 0".
-    fn rank_text(&self) -> String {
-        if self.players.len() == 1 {
-            return format!("RANK: {}", self.players[0].tank.rank);
-        }
-        let parts: Vec<String> = self
-            .players
-            .iter()
-            .enumerate()
-            .map(|(i, p)| format!("P{}: {}", i + 1, p.tank.rank))
-            .collect();
-        format!("RANK {}", parts.join("  "))
-    }
-
     pub fn draw(&self) {
         clear_background(BLACK);
 
         let playfield_w = self.map.width as f32 * self.tile_size;
         let playfield_h = self.map.height as f32 * self.tile_size;
 
-        let cam = Camera2D {
-            target: vec2(playfield_w / 2.0, playfield_h / 2.0),
-            zoom: vec2(2.0 / playfield_w, 2.0 / playfield_h),
-            ..Default::default()
-        };
+        // Камера с рамкой; пропорции сохраняются при любом размере окна.
+        let cam = hud::game_camera(self.tile_size, self.map.width, self.map.height);
         set_camera(&cam);
+        hud::draw_frame(self.tile_size, self.map.width, self.map.height);
 
         self.map.draw(self.tile_size);
         for b in self.bonuses.iter() { b.draw(); }
@@ -491,65 +476,26 @@ impl Game {
             }
         }
 
+        // Боковая панель (в той же камере).
+        let colors: Vec<Color> = self
+            .players
+            .iter()
+            .map(|p| if p.tank.player_slot == 0 { YELLOW } else { GREEN })
+            .collect();
+        hud::draw_panel(
+            self.tile_size,
+            self.map.width,
+            self.map.height,
+            &hud::PanelInfo {
+                enemies_left: self.spawner.remaining_to_spawn,
+                lives: self.lives,
+                player_colors: &colors,
+                level: self.current_level,
+                freeze_timer: self.freeze_timer,
+                shovel_timer: self.shovel_timer,
+            },
+        );
+
         set_default_camera();
-
-        draw_text(
-            &format!("LEVEL: {}", self.current_level),
-            10.0,
-            24.0,
-            24.0,
-            WHITE,
-        );
-        draw_text(
-            &format!("LIVES: {}", self.lives),
-            10.0,
-            48.0,
-            24.0,
-            WHITE,
-        );
-        draw_text(
-            &format!(
-                "ENEMIES: {} + {} in reserve",
-                self.enemies.iter().filter(|e| e.alive).count(),
-                self.spawner.remaining_to_spawn
-            ),
-            10.0,
-            72.0,
-            20.0,
-            LIGHTGRAY,
-        );
-        draw_text(
-            &format!("BONUSES PICKED: {}", self.picked_bonuses),
-            10.0,
-            96.0,
-            20.0,
-            LIGHTGRAY,
-        );
-        draw_text(
-            &self.rank_text(),
-            10.0,
-            120.0,
-            20.0,
-            LIGHTGRAY,
-        );
-
-        if self.freeze_timer > 0.0 {
-            draw_text(
-                &format!("FREEZE: {:.1}s", self.freeze_timer),
-                10.0,
-                144.0,
-                20.0,
-                SKYBLUE,
-            );
-        }
-        if self.shovel_timer > 0.0 {
-            draw_text(
-                &format!("SHOVEL: {:.1}s", self.shovel_timer),
-                10.0,
-                168.0,
-                20.0,
-                ORANGE,
-            );
-        }
     }
 }
