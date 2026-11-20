@@ -315,7 +315,7 @@ impl GameMap {
         let base_x = base.x;
         let base_y = base.y;
 
-        let mut set_tile = |map: &mut GameMap, x: i32, y: i32, out: &mut Vec<IVec2>| {
+        let set_tile = |map: &mut GameMap, x: i32, y: i32, out: &mut Vec<IVec2>| {
             if x < 0 || x >= map.width || y < 0 || y >= map.height {
                 return;
             }

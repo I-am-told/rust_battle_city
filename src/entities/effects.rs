@@ -148,16 +148,13 @@ impl Effect {
     }
 }
 
-/// Сколько секунд мерцает звёздочка перед появлением танка.
-pub const SPAWN_STAR_TIME: f32 = 1.0;
-
 /// Мерцающая звёздочка появления (как на Dandy): четырёхлучевая звезда,
 /// которая пульсирует — сжимается и разгорается — пока не появится танк.
 /// `center` — центр точки появления, `size` — размер танка,
-/// `elapsed` — сколько секунд звезда уже горит.
-pub fn draw_spawn_star(center: Vec2, size: f32, elapsed: f32) {
+/// `elapsed` — сколько секунд звезда уже горит, `total` — сколько всего.
+pub fn draw_spawn_star(center: Vec2, size: f32, elapsed: f32, total: f32) {
     // 4 пульса за время звезды.
-    let pulse = (elapsed / SPAWN_STAR_TIME * 4.0 * std::f32::consts::TAU).sin() * 0.5 + 0.5;
+    let pulse = (elapsed / total.max(0.01) * 4.0 * std::f32::consts::TAU).sin() * 0.5 + 0.5;
     let r = size * (0.18 + 0.32 * pulse);
     let thin = r * 0.22;
     let c = center;

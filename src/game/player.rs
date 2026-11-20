@@ -1,5 +1,5 @@
 use macroquad::prelude::*;
-use crate::entities::effects::SPAWN_STAR_TIME;
+use crate::config::Gameplay;
 use crate::entities::tank::{Direction, Tank};
 use crate::input::{DirectionInput, KeyBindings};
 
@@ -7,15 +7,6 @@ use crate::input::{DirectionInput, KeyBindings};
 /// большие id, чтобы никогда не пересечься.
 pub const PLAYER_ID_BASE: u32 = 1_000_000;
 
-/// Время до возрождения после гибели, секунд.
-pub const RESPAWN_DELAY: f32 = 1.0;
-/// Неуязвимость после возрождения, секунд.
-pub const SPAWN_SHIELD: f32 = 3.0;
-/// Каждые столько очков — дополнительная жизнь (как в оригинале).
-pub const EXTRA_LIFE_EVERY: u32 = 20_000;
-
-/// Неуязвимость от бонуса-каски, секунд (как в оригинале — заметно дольше).
-pub const HELMET_SHIELD: f32 = 10.0;
 
 /// Игрок: танк + его управление + состояние возрождения.
 pub struct Player {
@@ -35,10 +26,12 @@ pub struct Player {
     /// Сколько врагов каждого типа уничтожено на этом уровне
     /// (индекс — EnemyKind::index), для экрана подсчёта.
     pub kills: [u32; 4],
+    /// Настройки из config.ron (gameplay).
+    tuning: Gameplay,
 }
 
 impl Player {
-    pub fn new(tank: Tank, keys: KeyBindings, spawn_tile: IVec2, tile_size: f32) -> Self {
+    pub fn new(tank: Tank, keys: KeyBindings, spawn_tile: IVec2, tile_size: f32, tuning: &Gameplay) -> Self {
         let spawn = vec2(spawn_tile.x as f32 * tile_size, spawn_tile.y as f32 * tile_size);
         Self {
             tank,
@@ -51,19 +44,25 @@ impl Player {
             star: None,
             score: 0,
             kills: [0; 4],
+            tuning: *tuning,
         }
     }
 
     /// Начислить очки. Возвращает, сколько дополнительных жизней
-    /// заработано (каждые EXTRA_LIFE_EVERY очков).
+    /// заработано (каждые `extra_life_every` очков; 0 — не давать).
     pub fn add_score(&mut self, points: u32) -> u32 {
-        let before = self.score / EXTRA_LIFE_EVERY;
+        let every = self.tuning.extra_life_every;
+        let before = self.score;
         self.score = self.score.saturating_add(points);
-        self.score / EXTRA_LIFE_EVERY - before
+        // checked_div: при every == 0 жизни за очки не даются.
+        match (self.score.checked_div(every), before.checked_div(every)) {
+            (Some(now), Some(was)) => now - was,
+            _ => 0,
+        }
     }
 
     /// Начать появление: на точке мерцает звёздочка, танка ещё нет.
-    /// Через SPAWN_STAR_TIME танк появится с защитным полем (`tick_star`).
+    /// Через `spawn_star_time` танк появится с защитным полем (`tick_star`).
     pub fn begin_spawn(&mut self) {
         self.tank.alive = false;
         self.respawn_timer = None;
@@ -79,7 +78,7 @@ impl Player {
     pub fn tick_star(&mut self, dt: f32) {
         if let Some(t) = self.star {
             let t = t + dt;
-            if t >= SPAWN_STAR_TIME {
+            if t >= self.tuning.spawn_star_time {
                 self.star = None;
                 self.respawn();
             } else {
@@ -97,7 +96,7 @@ impl Player {
         self.tank.alive = true;
         self.tank.hp = self.tank.max_hp;
         self.invuln_timer = 0.0;
-        self.give_shield(SPAWN_SHIELD);
+        self.give_shield(self.tuning.spawn_shield);
         self.respawn_timer = None;
     }
 
@@ -112,7 +111,7 @@ impl Player {
         }
         // Как в оригинале: после гибели ранг (звёзды) сбрасывается.
         self.tank.apply_rank(0);
-        self.respawn_timer = Some(RESPAWN_DELAY);
+        self.respawn_timer = Some(self.tuning.respawn_delay);
         true
     }
 

@@ -4,13 +4,13 @@ use crate::config::Config;
 use crate::input::KeyBindings;
 use crate::map::GameMap;
 use crate::entities::tank::{Tank, Direction, Team, TurnAssist};
-use crate::entities::bullet::{Bullet, BulletHit};
+use crate::entities::bullet::{Bullet, BulletHit, BulletSpec};
 use crate::map::WallHit;
 use crate::sound::Sfx;
 use crate::entities::spawner::EnemySpawner;
-use crate::entities::bonus::Bonus;
-use crate::entities::effects::{draw_spawn_star, Effect, EffectKind, SPAWN_STAR_TIME};
-use crate::game::bonuses::apply_bonus;
+use crate::config::Gameplay;
+use crate::entities::bonus::{Bonus, BonusKind};
+use crate::entities::effects::{draw_spawn_star, Effect, EffectKind};
 use crate::game::level::LevelConfig;
 use crate::game::hud::{self, draw_tank_icon};
 use crate::entities::enemy_kind::EnemyKind;
@@ -19,18 +19,8 @@ use crate::game::player::{Player, PLAYER_ID_BASE};
 use crate::levels::LevelSet;
 use std::rc::Rc;
 
-pub const BONUS_LIFETIME: f32 = 15.0;
 /// Максимальный ранг игрока (см. Tank::apply_rank).
 pub const MAX_RANK: u8 = 4;
-/// Сколько секунд игра продолжается после гибели последнего врага
-/// (как в оригинале — можно успеть подобрать бонус).
-pub const VICTORY_DELAY: f32 = 5.0;
-/// Запасные жизни на старте — на каждого игрока (как в оригинале: «IP 2»).
-/// Запас общий: при двух игроках на старте 4.
-pub const START_LIVES_PER_PLAYER: u32 = 2;
-
-/// Очки за подобранный бонус (как в оригинале).
-pub const BONUS_POINTS: u32 = 500;
 
 /// Что переносится между уровнями.
 pub struct Progress {
@@ -96,6 +86,8 @@ pub struct Game {
     pub levels: Rc<LevelSet>,
     /// Рекорд (обновляется сразу, как только кто-то его побил).
     pub hiscore: u32,
+    /// Настройки игрового процесса из config.ron.
+    pub tuning: Gameplay,
 }
 
 impl Game {
@@ -106,7 +98,8 @@ impl Game {
         let n = keys.len();
         let progress = Progress {
             level: 1,
-            lives: START_LIVES_PER_PLAYER * n as u32,
+            // Запас общий: при двух игроках на старте вдвое больше.
+            lives: cfg.gameplay.start_lives_per_player * n as u32,
             ranks: vec![0; n],
             scores: vec![0; n],
             hiscore,
@@ -163,8 +156,11 @@ impl Game {
                 tank.id = PLAYER_ID_BASE + i as u32;
                 tank.player_slot = i as u8;
                 tank.turn_assist = turn_assist;
+                tank.ice_slide_tiles = cfg.gameplay.ice_slide_tiles;
+                tank.rank4_speed_mult = cfg.gameplay.rank4_speed_mult;
+                tank.turn_slide_time = cfg.gameplay.turn_slide_time;
                 tank.apply_rank(ranks.get(i).copied().unwrap_or(0));
-                let mut p = Player::new(tank, k, tile, cfg.tile_size);
+                let mut p = Player::new(tank, k, tile, cfg.tile_size, &cfg.gameplay);
                 p.score = scores.get(i).copied().unwrap_or(0);
                 p
             })
@@ -219,6 +215,7 @@ impl Game {
             current_level: level,
             levels,
             hiscore,
+            tuning: cfg.gameplay,
         }
     }
 
@@ -344,7 +341,7 @@ impl Game {
             *t += dt;
         }
         let (ready, waiting): (Vec<_>, Vec<_>) =
-            self.pending.drain(..).partition(|(_, t)| *t >= SPAWN_STAR_TIME);
+            self.pending.drain(..).partition(|(_, t)| *t >= self.tuning.spawn_star_time);
         self.pending = waiting;
         for (mut tank, _) in ready {
             tank.frozen = frozen_now;
@@ -395,8 +392,10 @@ impl Game {
                 &self.map,
                 &snapshot,
                 self.tile_size,
-                self.bullet_speed * 0.75,
-                self.bullet_size,
+                BulletSpec {
+                    speed: self.bullet_speed * self.tuning.enemy_bullet_speed_mult,
+                    size: self.bullet_size,
+                },
                 active,
             ) {
                 self.bullets.push(bullet);
@@ -416,9 +415,9 @@ impl Game {
             &tanks_for_spawn,
             self.tile_size,
             self.tank_size,
-            self.tank_speed * 0.75,
+            self.tank_speed * self.tuning.enemy_speed_mult,
         ) {
-            // Сначала звёздочка, танк выедет через SPAWN_STAR_TIME.
+            // Сначала звёздочка, танк выедет через spawn_star_time.
             self.pending.push((new_enemy, 0.0));
         }
 
@@ -506,7 +505,7 @@ impl Game {
                         tile.x as f32 * self.tile_size,
                         tile.y as f32 * self.tile_size,
                     );
-                    self.bonuses.push(Bonus::new(pos, self.tank_size, BONUS_LIFETIME));
+                    self.bonuses.push(Bonus::new(pos, self.tank_size, self.tuning.bonus_lifetime));
                     self.sfx.push(Sfx::BonusAppear);
                     forbidden.push(tile);
                 }
@@ -531,43 +530,22 @@ impl Game {
             b.update(dt);
         }
 
-        let mut picked: Vec<(u32, Vec2)> = Vec::new();
         // Бонус берёт любой живой игрок; звезда — тому, кто взял,
         // «+» — в общий запас, остальное действует на всех.
+        let mut picked: Vec<(usize, BonusKind, Vec2)> = Vec::new();
         for b in self.bonuses.iter_mut() {
-            for p in self.players.iter_mut() {
-                if !p.tank.alive {
-                    continue;
-                }
-                if b.try_pickup(p.tank.pos, p.tank.size) {
-                    self.picked_bonuses += 1;
-                    // Очки за бонус — после цикла (здесь заняты заимствования).
-                    picked.push((p.tank.id, b.pos + vec2(b.size, b.size) / 2.0));
-                    self.sfx.push(if b.kind == crate::entities::bonus::BonusKind::Life {
-                        Sfx::LifeUp
-                    } else {
-                        Sfx::BonusPickup
-                    });
-                    apply_bonus(
-                        b.kind,
-                        p,
-                        &mut self.lives,
-                        &mut self.enemies,
-                        &mut self.map,
-                        &mut self.freeze_timer,
-                        &mut self.shovel_timer,
-                        &mut self.shovel_tiles,
-                        MAX_RANK,
-                    );
+            for (pi, p) in self.players.iter().enumerate() {
+                if p.tank.alive && b.try_pickup(p.tank.pos, p.tank.size) {
+                    picked.push((pi, b.kind, b.pos + vec2(b.size, b.size) / 2.0));
                 }
             }
         }
-
         self.bonuses.retain(|b| b.alive);
-        for (id, at) in picked {
-            if let Some(pi) = self.players.iter().position(|p| p.tank.id == id) {
-                self.award(pi, BONUS_POINTS, at);
-            }
+        for (pi, kind, at) in picked {
+            self.picked_bonuses += 1;
+            self.sfx.push(if kind == BonusKind::Life { Sfx::LifeUp } else { Sfx::BonusPickup });
+            self.apply_bonus(pi, kind);
+            self.award(pi, self.tuning.bonus_points, at);
         }
 
         // Поражение: штаб уничтожен, или все игроки погибли и жизней нет.
@@ -577,10 +555,10 @@ impl Game {
             self.state = GameState::Defeat;
             self.sfx.push(Sfx::GameOver);
         } else if self.spawner.remaining_to_spawn == 0 && self.enemies.is_empty() && self.pending.is_empty() {
-            // Враги кончились — игра идёт ещё VICTORY_DELAY секунд, потом победа.
+            // Враги кончились — игра идёт ещё victory_delay секунд, потом победа.
             // Поражение в это время (штаб, последняя жизнь) всё ещё возможно —
             // оно проверяется выше и раньше.
-            let t = self.victory_timer.get_or_insert(VICTORY_DELAY);
+            let t = self.victory_timer.get_or_insert(self.tuning.victory_delay);
             *t -= dt;
             if *t <= 0.0 {
                 self.state = GameState::Victory;
@@ -683,11 +661,11 @@ impl Game {
         // Звёздочки появления.
         let half = vec2(self.tank_size, self.tank_size) / 2.0;
         for (t, el) in self.pending.iter() {
-            draw_spawn_star(t.pos + half, self.tank_size, *el);
+            draw_spawn_star(t.pos + half, self.tank_size, *el, self.tuning.spawn_star_time);
         }
         for p in self.players.iter() {
             if let Some(el) = p.star {
-                draw_spawn_star(p.spawn + half, self.tank_size, el);
+                draw_spawn_star(p.spawn + half, self.tank_size, el, self.tuning.spawn_star_time);
             }
         }
         for fx in self.effects.iter() { fx.draw(); }

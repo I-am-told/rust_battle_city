@@ -1,6 +1,6 @@
 use macroquad::prelude::*;
 use crate::map::GameMap;
-use crate::entities::bullet::Bullet;
+use crate::entities::bullet::{Bullet, BulletSpec};
 use crate::entities::enemy_kind::EnemyKind;
 
 pub use crate::entities::direction::Direction;
@@ -28,14 +28,6 @@ impl TurnAssist {
     }
 }
 
-/// Сколько тайлов танк игрока проскальзывает по льду, если отпустить кнопку.
-pub const ICE_SLIDE_TILES: f32 = 1.0;
-
-/// Во сколько раз быстрее танк на 4-м ранге.
-pub const RANK4_SPEED_MULT: f32 = 1.3;
-
-/// За сколько секунд (не дольше) танк доезжает до точки поворота в режиме Smooth.
-pub const TURN_SLIDE_TIME: f32 = 0.1;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Team {
@@ -78,6 +70,12 @@ pub struct Tank {
     pub odometer: f32,
     /// Сколько пикселей ещё проскользить по льду (кнопку отпустили).
     pub ice_glide: f32,
+    /// Сколько тайлов скользить по льду (gameplay.ice_slide_tiles).
+    pub ice_slide_tiles: f32,
+    /// Множитель скорости на 4-м ранге (gameplay.rank4_speed_mult).
+    pub rank4_speed_mult: f32,
+    /// Время доезда до поворота в режиме Smooth (gameplay.turn_slide_time).
+    pub turn_slide_time: f32,
 }
 
 impl Tank {
@@ -110,6 +108,9 @@ impl Tank {
             slide_speed: 0.0,
             odometer: 0.0,
             ice_glide: 0.0,
+            ice_slide_tiles: 1.0,
+            rank4_speed_mult: 1.3,
+            turn_slide_time: 0.1,
         }
     }
 
@@ -140,7 +141,7 @@ impl Tank {
     /// 3 — пули пробивают сталь; 4 — всё это и танк быстрее на 30%.
     pub fn apply_rank(&mut self, rank: u8) {
         self.rank = rank;
-        self.speed = if rank >= 4 { self.base_speed * RANK4_SPEED_MULT } else { self.base_speed };
+        self.speed = if rank >= 4 { self.base_speed * self.rank4_speed_mult } else { self.base_speed };
         match rank {
             0 => {
                 self.max_active_bullets = 1;
@@ -300,7 +301,7 @@ impl Tank {
         self.move_along(self.direction, dist, map, others, tile_size);
         // Пока едем по льду — «запасаем» скольжение на случай, если отпустят.
         self.ice_glide = if map.on_ice(self.pos, size, tile_size) {
-            ICE_SLIDE_TILES * tile_size
+            self.ice_slide_tiles * tile_size
         } else {
             0.0
         };
@@ -312,8 +313,7 @@ impl Tank {
         map: &GameMap,
         others: &[Tank],
         tile_size: f32,
-        bullet_speed: f32,
-        bullet_size: f32,
+        bullet: BulletSpec,
         active_bullets: u8,
     ) -> Option<Bullet> {
         if !self.alive {
@@ -345,7 +345,7 @@ impl Tank {
         self.ai_shoot_timer -= dt;
         if self.ai_shoot_timer <= 0.0 {
             self.ai_shoot_timer = 0.3 + rand::gen_range(0.0, 1.2);
-            return self.try_fire(active_bullets, map, tile_size, bullet_speed, bullet_size);
+            return self.try_fire(active_bullets, map, tile_size, bullet.speed, bullet.size);
         }
 
         None
@@ -422,7 +422,7 @@ impl Tank {
             let dist = (target - self.pos).length();
             if dist > 0.01 {
                 self.slide_target = Some(target);
-                self.slide_speed = (dist / TURN_SLIDE_TIME).max(self.speed);
+                self.slide_speed = (dist / self.turn_slide_time.max(0.001)).max(self.speed);
             }
         } else {
             self.pos = target;

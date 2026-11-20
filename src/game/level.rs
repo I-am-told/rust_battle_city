@@ -13,6 +13,8 @@ pub struct LevelConfig {
 
 impl LevelConfig {
     pub fn for_level(n: u32) -> Self {
+        // Уровни считаются с 1; 0 считаем первым (иначе n - 5 ниже ушло бы в минус).
+        let n = n.max(1);
         match n {
             1 => Self {
                 total_enemies: 10,

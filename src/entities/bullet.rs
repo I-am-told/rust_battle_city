@@ -1,6 +1,13 @@
 use macroquad::prelude::*;
 use crate::map::{GameMap, WallHit};
 
+/// Параметры пуль, которыми стреляет танк (скорость и размер в пикселях).
+#[derive(Clone, Copy, Debug)]
+pub struct BulletSpec {
+    pub speed: f32,
+    pub size: f32,
+}
+
 /// Чем закончился полёт пули (для звука).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum BulletHit {

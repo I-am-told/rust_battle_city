@@ -89,6 +89,68 @@ impl Default for SystemKeys {
     }
 }
 
+/// Настройки игрового процесса (времена, множители, очки).
+/// Всё в секундах, если не сказано иное.
+#[derive(Deserialize, Clone, Copy, Debug)]
+#[serde(default)]
+pub struct Gameplay {
+    /// Запасных жизней на старте — на каждого игрока (запас общий).
+    pub start_lives_per_player: u32,
+    /// Пауза между гибелью игрока и звёздочкой возрождения.
+    pub respawn_delay: f32,
+    /// Сколько горит звёздочка перед появлением танка.
+    pub spawn_star_time: f32,
+    /// Защитное поле после появления игрока.
+    pub spawn_shield: f32,
+    /// Защитное поле от бонуса-каски.
+    pub helmet_shield: f32,
+    /// Сколько стоят враги после бонуса-часов.
+    pub freeze_time: f32,
+    /// Сколько держится сталь вокруг штаба после бонуса-лопаты.
+    pub shovel_time: f32,
+    /// Сколько бонус лежит на поле, пока не исчезнет.
+    pub bonus_lifetime: f32,
+    /// Сколько игра идёт после гибели последнего врага (успеть взять бонус).
+    pub victory_delay: f32,
+    /// За сколько секунд танк доезжает до точки поворота (turn_assist "smooth").
+    pub turn_slide_time: f32,
+    /// Сколько тайлов танк игрока скользит по льду, если отпустить кнопку.
+    pub ice_slide_tiles: f32,
+    /// Во сколько раз быстрее танк игрока на 4-м ранге.
+    pub rank4_speed_mult: f32,
+    /// Скорость врагов относительно tank_speed (у быстрых — ещё ×2).
+    pub enemy_speed_mult: f32,
+    /// Скорость вражеских пуль относительно bullet_speed.
+    pub enemy_bullet_speed_mult: f32,
+    /// Каждые столько очков — дополнительная жизнь.
+    pub extra_life_every: u32,
+    /// Очки за подобранный бонус.
+    pub bonus_points: u32,
+}
+
+impl Default for Gameplay {
+    fn default() -> Self {
+        Self {
+            start_lives_per_player: 2,
+            respawn_delay: 1.0,
+            spawn_star_time: 1.0,
+            spawn_shield: 3.0,
+            helmet_shield: 10.0,
+            freeze_time: 10.0,
+            shovel_time: 10.0,
+            bonus_lifetime: 15.0,
+            victory_delay: 5.0,
+            turn_slide_time: 0.1,
+            ice_slide_tiles: 1.0,
+            rank4_speed_mult: 1.3,
+            enemy_speed_mult: 0.75,
+            enemy_bullet_speed_mult: 0.75,
+            extra_life_every: 20_000,
+            bonus_points: 500,
+        }
+    }
+}
+
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
@@ -112,6 +174,8 @@ pub struct Config {
     pub sound_volume: f32,
     /// Гул мотора, пока танк игрока едет.
     pub engine_sound: bool,
+    /// Настройки игрового процесса.
+    pub gameplay: Gameplay,
     pub player1_keys: PlayerKeys,
     pub player2_keys: PlayerKeys,
     pub system_keys: SystemKeys,
@@ -130,6 +194,7 @@ impl Default for Config {
             turn_assist: "smooth".into(),
             sound_volume: 0.6,
             engine_sound: true,
+            gameplay: Gameplay::default(),
             player1_keys: PlayerKeys::player1_default(),
             player2_keys: PlayerKeys::player2_default(),
             system_keys: SystemKeys::default(),

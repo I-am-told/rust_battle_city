@@ -112,7 +112,7 @@ pub fn draw_panel(tile_size: f32, grid_w: i32, grid_h: i32, info: &PanelInfo) {
         draw_tank_icon(x0 + ts * 1.0 + i as f32 * ts, ly + ts * 0.3, icon, *c);
     }
     draw_text(
-        &info.lives.to_string(),
+        info.lives.to_string(),
         x0 + ts * 1.0,
         ly + ts * 2.6,
         ts * 1.6,
@@ -123,7 +123,7 @@ pub fn draw_panel(tile_size: f32, grid_w: i32, grid_h: i32, info: &PanelInfo) {
     let mut ty = gh * ts * 0.75;
     if info.freeze_timer > 0.0 {
         draw_text(
-            &format!("T {:.0}", info.freeze_timer.ceil()),
+            format!("T {:.0}", info.freeze_timer.ceil()),
             x0 + ts * 1.0,
             ty,
             ts * 1.1,
@@ -133,7 +133,7 @@ pub fn draw_panel(tile_size: f32, grid_w: i32, grid_h: i32, info: &PanelInfo) {
     }
     if info.shovel_timer > 0.0 {
         draw_text(
-            &format!("S {:.0}", info.shovel_timer.ceil()),
+            format!("S {:.0}", info.shovel_timer.ceil()),
             x0 + ts * 1.0,
             ty,
             ts * 1.1,
@@ -152,7 +152,7 @@ pub fn draw_panel(tile_size: f32, grid_w: i32, grid_h: i32, info: &PanelInfo) {
         ORANGE,
     );
     draw_text(
-        &info.level.to_string(),
+        info.level.to_string(),
         x0 + ts * 1.0,
         fy + ts * 2.9,
         ts * 1.6,

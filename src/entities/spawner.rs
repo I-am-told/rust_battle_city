@@ -84,7 +84,7 @@ impl EnemySpawner {
         self.next_id += 1;
 
         self.spawned_count += 1;
-        let is_bonus = self.spawned_count % 4 == 0;
+        let is_bonus = self.spawned_count.is_multiple_of(4);
 
         let kind = self.level.pick_kind();
 
