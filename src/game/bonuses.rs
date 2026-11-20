@@ -1,12 +1,13 @@
 use macroquad::prelude::*;
 use crate::entities::tank::Tank;
 use crate::entities::bonus::BonusKind;
+use crate::game::player::{Player, HELMET_SHIELD};
 use crate::map::GameMap;
 
 /// Применяет эффект подобранного бонуса.
 pub fn apply_bonus(
     kind: BonusKind,
-    player: &mut Tank,
+    picker: &mut Player,
     player_lives: &mut u32,
     enemies: &mut [Tank],
     map: &mut GameMap,
@@ -17,6 +18,7 @@ pub fn apply_bonus(
 ) {
     match kind {
         BonusKind::Star => {
+            let player = &mut picker.tank;
             let new_rank = (player.rank + 1).min(max_rank);
             player.apply_rank(new_rank);
             println!(
@@ -48,6 +50,10 @@ pub fn apply_bonus(
         BonusKind::Timer => {
             *freeze_timer = 10.0;
             println!("Timer picked! Enemies frozen for 10s");
+        }
+        BonusKind::Helmet => {
+            picker.give_shield(HELMET_SHIELD);
+            println!("Helmet picked! Shield for {HELMET_SHIELD}s");
         }
         BonusKind::Shovel => {
             // Если лопата уже активна — снимаем старую, потом ставим новую.

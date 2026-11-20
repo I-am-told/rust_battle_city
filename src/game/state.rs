@@ -467,7 +467,7 @@ impl Game {
                     self.picked_bonuses += 1;
                     apply_bonus(
                         b.kind,
-                        &mut p.tank,
+                        p,
                         &mut self.lives,
                         &mut self.enemies,
                         &mut self.map,

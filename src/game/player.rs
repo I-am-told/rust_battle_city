@@ -11,6 +11,8 @@ pub const PLAYER_ID_BASE: u32 = 1_000_000;
 pub const RESPAWN_DELAY: f32 = 1.0;
 /// Неуязвимость после возрождения, секунд.
 pub const SPAWN_SHIELD: f32 = 3.0;
+/// Неуязвимость от бонуса-каски, секунд (как в оригинале — заметно дольше).
+pub const HELMET_SHIELD: f32 = 10.0;
 
 /// Игрок: танк + его управление + состояние возрождения.
 pub struct Player {
@@ -76,8 +78,8 @@ impl Player {
         self.tank.direction = Direction::Up;
         self.tank.alive = true;
         self.tank.hp = self.tank.max_hp;
-        self.tank.invulnerable = true;
-        self.invuln_timer = SPAWN_SHIELD;
+        self.invuln_timer = 0.0;
+        self.give_shield(SPAWN_SHIELD);
         self.respawn_timer = None;
     }
 
@@ -94,6 +96,12 @@ impl Player {
         self.tank.apply_rank(0);
         self.respawn_timer = Some(RESPAWN_DELAY);
         true
+    }
+
+    /// Включить защитное поле на `secs` секунд (не сокращает уже идущее).
+    pub fn give_shield(&mut self, secs: f32) {
+        self.tank.invulnerable = true;
+        self.invuln_timer = self.invuln_timer.max(secs);
     }
 
     /// Таймер неуязвимости.
