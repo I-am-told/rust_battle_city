@@ -21,11 +21,12 @@ pub struct Menu {
     /// Открыт экран CONTROLS.
     controls: Option<ControlsScreen>,
     keys_path: PathBuf,
+    hiscore: u32,
 }
 
 impl Menu {
-    pub fn new(selected: usize, keys_path: &Path) -> Self {
-        Self { selected, controls: None, keys_path: keys_path.to_path_buf() }
+    pub fn new(selected: usize, keys_path: &Path, hiscore: u32) -> Self {
+        Self { selected, controls: None, keys_path: keys_path.to_path_buf(), hiscore }
     }
 
     /// Вверх/вниз — клавиши любого игрока или стрелки; выбор — Start
@@ -77,6 +78,7 @@ impl Menu {
             draw_text(text, w / 2.0 - dims.width / 2.0, y, size, color);
         };
 
+        center_text(&format!("HI-SCORE  {}", self.hiscore), h * 0.12, 28.0, LIGHTGRAY);
         center_text("BATTLE CITY", h * 0.28, 72.0, ORANGE);
 
         let item_size = 40.0;

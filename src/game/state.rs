@@ -12,7 +12,9 @@ use crate::entities::bonus::Bonus;
 use crate::entities::effects::{draw_spawn_star, Effect, EffectKind, SPAWN_STAR_TIME};
 use crate::game::bonuses::apply_bonus;
 use crate::game::level::LevelConfig;
-use crate::game::hud;
+use crate::game::hud::{self, draw_tank_icon};
+use crate::entities::enemy_kind::EnemyKind;
+use crate::entities::tank_render::enemy_color;
 use crate::game::player::{Player, PLAYER_ID_BASE};
 use crate::levels::LevelSet;
 use std::rc::Rc;
@@ -26,6 +28,22 @@ pub const VICTORY_DELAY: f32 = 5.0;
 /// Запасные жизни на старте — на каждого игрока (как в оригинале: «IP 2»).
 /// Запас общий: при двух игроках на старте 4.
 pub const START_LIVES_PER_PLAYER: u32 = 2;
+
+/// Очки за подобранный бонус (как в оригинале).
+pub const BONUS_POINTS: u32 = 500;
+
+/// Что переносится между уровнями.
+pub struct Progress {
+    pub level: u32,
+    /// Общий запас жизней.
+    pub lives: u32,
+    /// Ранг каждого игрока.
+    pub ranks: Vec<u8>,
+    /// Очки каждого игрока.
+    pub scores: Vec<u32>,
+    /// Рекорд (лучший результат за всё время).
+    pub hiscore: u32,
+}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum GameState {
@@ -76,28 +94,35 @@ pub struct Game {
     pub current_level: u32,
     /// Карты уровней (из папки levels).
     pub levels: Rc<LevelSet>,
+    /// Рекорд (обновляется сразу, как только кто-то его побил).
+    pub hiscore: u32,
 }
 
 impl Game {
     /// Новая игра с 1-го уровня. Число игроков = длина `keys` (1 или 2).
     /// Клавиши разбираются один раз в main, чтобы предупреждения
     /// о кривых клавишах не повторялись каждый уровень.
-    pub fn new(cfg: &Config, keys: Vec<KeyBindings>, levels: Rc<LevelSet>) -> Self {
-        let n = keys.len() as u32;
-        let ranks = vec![0; keys.len()];
-        Self::new_with_progress(cfg, keys, levels, 1, START_LIVES_PER_PLAYER * n, ranks)
+    pub fn new(cfg: &Config, keys: Vec<KeyBindings>, levels: Rc<LevelSet>, hiscore: u32) -> Self {
+        let n = keys.len();
+        let progress = Progress {
+            level: 1,
+            lives: START_LIVES_PER_PLAYER * n as u32,
+            ranks: vec![0; n],
+            scores: vec![0; n],
+            hiscore,
+        };
+        Self::new_with_progress(cfg, keys, levels, progress)
     }
 
-    /// Создаёт игру на уровне `level` с сохранением прогресса:
-    /// общий запас жизней и ранг каждого игрока.
+    /// Создаёт игру на уровне `progress.level` с сохранением прогресса:
+    /// общий запас жизней, ранг и очки каждого игрока, рекорд.
     pub fn new_with_progress(
         cfg: &Config,
         keys: Vec<KeyBindings>,
         levels: Rc<LevelSet>,
-        level: u32,
-        lives: u32,
-        ranks: Vec<u8>,
+        progress: Progress,
     ) -> Self {
+        let Progress { level, lives, ranks, scores, hiscore } = progress;
         let layout = levels.layout_for(level);
         let from_file = layout.is_some();
         let mut map = GameMap::with_layout(cfg.grid_width, cfg.grid_height, layout);
@@ -139,7 +164,9 @@ impl Game {
                 tank.player_slot = i as u8;
                 tank.turn_assist = turn_assist;
                 tank.apply_rank(ranks.get(i).copied().unwrap_or(0));
-                Player::new(tank, k, tile, cfg.tile_size)
+                let mut p = Player::new(tank, k, tile, cfg.tile_size);
+                p.score = scores.get(i).copied().unwrap_or(0);
+                p
             })
             .collect();
 
@@ -191,6 +218,7 @@ impl Game {
             picked_bonuses: 0,
             current_level: level,
             levels,
+            hiscore,
         }
     }
 
@@ -396,10 +424,11 @@ impl Game {
 
         // Пули. Игроки в одной команде — пули проходят сквозь напарника.
         let tanks_now = self.all_tanks();
-        let mut hit_ids: Vec<u32> = Vec::new();
+        // (в кого попали, чья пуля)
+        let mut hit_ids: Vec<(u32, u32)> = Vec::new();
         for b in self.bullets.iter_mut() {
             if let Some(hit_id) = b.update(dt, &mut self.map, &tanks_now, self.tile_size) {
-                hit_ids.push(hit_id);
+                hit_ids.push((hit_id, b.owner_id));
             }
         }
 
@@ -435,7 +464,7 @@ impl Game {
         }
 
         let mut pending_bonuses: u32 = 0;
-        for id in hit_ids {
+        for (id, owner) in hit_ids {
             if let Some(p) = self.players.iter_mut().find(|p| p.tank.id == id) {
                 // Player::hit сам проверяет alive/invulnerable: вторая пуля
                 // в том же кадре ничего не делает.
@@ -452,6 +481,17 @@ impl Game {
                 }
                 if !e.alive && was_bonus {
                     pending_bonuses += 1;
+                }
+                if !e.alive {
+                    // Очки тому, чья пуля добила.
+                    if let (Some(kind), Some(pi)) = (
+                        e.kind,
+                        self.players.iter().position(|p| p.tank.id == owner),
+                    ) {
+                        let c = e.pos + vec2(e.size, e.size) / 2.0;
+                        self.players[pi].kills[kind.index()] += 1;
+                        self.award(pi, kind.score(), c);
+                    }
                 }
             }
         }
@@ -491,6 +531,7 @@ impl Game {
             b.update(dt);
         }
 
+        let mut picked: Vec<(u32, Vec2)> = Vec::new();
         // Бонус берёт любой живой игрок; звезда — тому, кто взял,
         // «+» — в общий запас, остальное действует на всех.
         for b in self.bonuses.iter_mut() {
@@ -500,6 +541,8 @@ impl Game {
                 }
                 if b.try_pickup(p.tank.pos, p.tank.size) {
                     self.picked_bonuses += 1;
+                    // Очки за бонус — после цикла (здесь заняты заимствования).
+                    picked.push((p.tank.id, b.pos + vec2(b.size, b.size) / 2.0));
                     self.sfx.push(if b.kind == crate::entities::bonus::BonusKind::Life {
                         Sfx::LifeUp
                     } else {
@@ -521,6 +564,11 @@ impl Game {
         }
 
         self.bonuses.retain(|b| b.alive);
+        for (id, at) in picked {
+            if let Some(pi) = self.players.iter().position(|p| p.tank.id == id) {
+                self.award(pi, BONUS_POINTS, at);
+            }
+        }
 
         // Поражение: штаб уничтожен, или все игроки погибли и жизней нет.
         // Игрок под звёздочкой — тоже «жив»: жизнь на него уже потрачена.
@@ -540,14 +588,78 @@ impl Game {
         }
     }
 
-    /// Переход на следующий уровень: общий запас жизней и ранги сохраняются.
-    /// Все игроки выходят на новый уровень, даже если ждали возрождения.
+    /// Начислить очки игроку `pi`, показать их в точке `at`,
+    /// выдать жизни за каждые 20 000 и обновить рекорд.
+    fn award(&mut self, pi: usize, points: u32, at: Vec2) {
+        let lives = self.players[pi].add_score(points);
+        if lives > 0 {
+            self.lives += lives;
+            self.sfx.push(Sfx::LifeUp);
+        }
+        self.effects.push(Effect::new(at, EffectKind::Points(points), self.tank_size));
+        self.hiscore = self.hiscore.max(self.players[pi].score);
+    }
+
+    /// Переход на следующий уровень: общий запас жизней, ранги и очки
+    /// сохраняются. Все игроки выходят на новый уровень, даже если ждали
+    /// возрождения.
     pub fn advance_level(&mut self, cfg: &Config) {
-        let next_level = self.current_level + 1;
-        let ranks: Vec<u8> = self.players.iter().map(|p| p.tank.rank).collect();
+        let progress = Progress {
+            level: self.current_level + 1,
+            lives: self.lives,
+            ranks: self.players.iter().map(|p| p.tank.rank).collect(),
+            scores: self.players.iter().map(|p| p.score).collect(),
+            hiscore: self.hiscore,
+        };
         let keys: Vec<KeyBindings> = self.players.iter().map(|p| p.keys.clone()).collect();
         let levels = self.levels.clone();
-        *self = Self::new_with_progress(cfg, keys, levels, next_level, self.lives, ranks);
+        *self = Self::new_with_progress(cfg, keys, levels, progress);
+    }
+
+    /// Экран подсчёта после уровня (как на Dandy): по каждому типу врага —
+    /// сколько уничтожено и сколько это очков, у каждого игрока свой столбец.
+    fn draw_tally(&self, w: f32, h: f32) {
+        let ts = self.tile_size;
+        draw_rectangle(0.0, 0.0, w, h, BLACK);
+        let center = |text: &str, x: f32, y: f32, size: f32, color: Color| {
+            let d = measure_text(text, None, size as u16, 1.0);
+            draw_text(text, x - d.width / 2.0, y, size, color);
+        };
+        center(&format!("HI-SCORE  {}", self.hiscore), w / 2.0, ts * 2.5, ts * 1.1, ORANGE);
+        center(&format!("STAGE  {}", self.current_level), w / 2.0, ts * 4.5, ts * 1.2, WHITE);
+
+        let n = self.players.len();
+        // Столбцы игроков; значки врагов — посередине (на двоих)
+        // или справа от столбца (на одного).
+        let cols: Vec<f32> = if n == 1 { vec![w * 0.38] } else { vec![w * 0.22, w * 0.78] };
+        let icon_x = if n == 1 { w * 0.68 } else { w * 0.5 };
+        let icon = ts * 1.3;
+
+        for (i, p) in self.players.iter().enumerate() {
+            let x = cols[i];
+            center(&format!("{} PLAYER", if i == 0 { "I" } else { "II" }), x, ts * 7.5, ts * 0.9, player_color(i));
+            center(&p.score.to_string(), x, ts * 9.0, ts * 1.0, ORANGE);
+        }
+
+        let mut y = ts * 11.5;
+        for kind in EnemyKind::all() {
+            draw_tank_icon(icon_x - icon / 2.0, y - icon * 0.85, icon, enemy_color(kind));
+            for (i, p) in self.players.iter().enumerate() {
+                let count = p.kills[kind.index()];
+                let line = format!("{:>2} x{:>3} = {:>4}", count, kind.score(), count * kind.score());
+                center(&line, cols[i], y, ts * 0.8, WHITE);
+            }
+            y += ts * 2.2;
+        }
+
+        // Итого: всего врагов у каждого.
+        draw_rectangle(w * 0.1, y - ts * 1.2, w * 0.8, ts * 0.1, WHITE);
+        for (i, p) in self.players.iter().enumerate() {
+            let total: u32 = p.kills.iter().sum();
+            center(&format!("TOTAL {total}"), cols[i], y + ts * 0.2, ts * 0.9, WHITE);
+        }
+
+        center("Press ENTER for next level", w / 2.0, h - ts * 1.5, ts * 0.75, LIGHTGRAY);
     }
 
     pub fn draw(&self) {
@@ -579,46 +691,45 @@ impl Game {
         for fx in self.effects.iter() { fx.draw(); }
 
         match self.state {
-            GameState::Victory => {
-                let text = "VICTORY";
-                let fs = 64;
-                let dims = measure_text(text, None, fs, 1.0);
-                draw_text(
-                    text,
-                    playfield_w / 2.0 - dims.width / 2.0,
-                    playfield_h / 2.0 - 20.0,
-                    fs as f32,
-                    GREEN,
-                );
-                let hint = "Press ENTER for next level";
-                let hfs = 24;
-                let hdims = measure_text(hint, None, hfs, 1.0);
-                draw_text(
-                    hint,
-                    playfield_w / 2.0 - hdims.width / 2.0,
-                    playfield_h / 2.0 + 30.0,
-                    hfs as f32,
-                    LIGHTGRAY,
-                );
-            }
+            GameState::Victory => self.draw_tally(playfield_w, playfield_h),
             GameState::Defeat => {
+                // Тёмная плашка, чтобы текст читался поверх карты.
+                let box_h = 175.0 + self.players.len() as f32 * 36.0;
+                draw_rectangle(
+                    playfield_w * 0.15,
+                    playfield_h / 2.0 - 100.0,
+                    playfield_w * 0.7,
+                    box_h,
+                    Color::new(0.0, 0.0, 0.0, 0.8),
+                );
                 let text = "GAME OVER";
                 let fs = 64;
                 let dims = measure_text(text, None, fs, 1.0);
                 draw_text(
                     text,
                     playfield_w / 2.0 - dims.width / 2.0,
-                    playfield_h / 2.0 - 20.0,
+                    playfield_h / 2.0 - 40.0,
                     fs as f32,
                     RED,
                 );
+                // Очки игроков и рекорд.
+                let mut y = playfield_h / 2.0 + 10.0;
+                for (i, p) in self.players.iter().enumerate() {
+                    let line = format!("P{}  {}", i + 1, p.score);
+                    let d = measure_text(&line, None, 32, 1.0);
+                    draw_text(&line, playfield_w / 2.0 - d.width / 2.0, y, 32.0, player_color(i));
+                    y += 36.0;
+                }
+                let hs = format!("HI-SCORE  {}", self.hiscore);
+                let d = measure_text(&hs, None, 28, 1.0);
+                draw_text(&hs, playfield_w / 2.0 - d.width / 2.0, y + 6.0, 28.0, ORANGE);
                 let hint = "Press ENTER for menu";
                 let hfs = 24;
                 let hdims = measure_text(hint, None, hfs, 1.0);
                 draw_text(
                     hint,
                     playfield_w / 2.0 - hdims.width / 2.0,
-                    playfield_h / 2.0 + 30.0,
+                    y + 50.0,
                     hfs as f32,
                     LIGHTGRAY,
                 );
@@ -664,4 +775,9 @@ impl Game {
 
         set_default_camera();
     }
+}
+
+/// Цвет игрока: P1 — жёлтый, P2 — зелёный.
+fn player_color(i: usize) -> Color {
+    if i == 0 { YELLOW } else { GREEN }
 }

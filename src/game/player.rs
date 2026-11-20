@@ -11,6 +11,9 @@ pub const PLAYER_ID_BASE: u32 = 1_000_000;
 pub const RESPAWN_DELAY: f32 = 1.0;
 /// Неуязвимость после возрождения, секунд.
 pub const SPAWN_SHIELD: f32 = 3.0;
+/// Каждые столько очков — дополнительная жизнь (как в оригинале).
+pub const EXTRA_LIFE_EVERY: u32 = 20_000;
+
 /// Неуязвимость от бонуса-каски, секунд (как в оригинале — заметно дольше).
 pub const HELMET_SHIELD: f32 = 10.0;
 
@@ -27,6 +30,11 @@ pub struct Player {
     pub invuln_timer: f32,
     /// Горит звёздочка появления: сколько секунд прошло. None — не горит.
     pub star: Option<f32>,
+    /// Очки за всю игру.
+    pub score: u32,
+    /// Сколько врагов каждого типа уничтожено на этом уровне
+    /// (индекс — EnemyKind::index), для экрана подсчёта.
+    pub kills: [u32; 4],
 }
 
 impl Player {
@@ -41,7 +49,17 @@ impl Player {
             respawn_timer: None,
             invuln_timer: 0.0,
             star: None,
+            score: 0,
+            kills: [0; 4],
         }
+    }
+
+    /// Начислить очки. Возвращает, сколько дополнительных жизней
+    /// заработано (каждые EXTRA_LIFE_EVERY очков).
+    pub fn add_score(&mut self, points: u32) -> u32 {
+        let before = self.score / EXTRA_LIFE_EVERY;
+        self.score = self.score.saturating_add(points);
+        self.score / EXTRA_LIFE_EVERY - before
     }
 
     /// Начать появление: на точке мерцает звёздочка, танка ещё нет.

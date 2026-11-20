@@ -2,6 +2,7 @@
 //! большой — когда уничтожен танк или штаб.
 
 use macroquad::prelude::*;
+use crate::ui_text::{draw_text, measure_text};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum EffectKind {
@@ -9,6 +10,8 @@ pub enum EffectKind {
     Small,
     /// Гибель танка или штаба: ~0.5 с, в два раза больше танка.
     Big,
+    /// Всплывающие очки (100, 200, … 500) — ~0.8 с.
+    Points(u32),
 }
 
 pub struct Effect {
@@ -29,6 +32,7 @@ impl Effect {
         let duration = match kind {
             EffectKind::Small => 0.2,
             EffectKind::Big => 0.5,
+            EffectKind::Points(_) => 0.8,
         };
         Self {
             center,
@@ -58,6 +62,14 @@ impl Effect {
         match self.kind {
             EffectKind::Small => self.draw_small(k),
             EffectKind::Big => self.draw_big(k),
+            EffectKind::Points(p) => {
+                // Число немного всплывает вверх.
+                let text = p.to_string();
+                let fs = self.size * 0.45;
+                let dims = measure_text(&text, None, fs as u16, 1.0);
+                let y = self.center.y - self.size * 0.25 * k;
+                draw_text(&text, self.center.x - dims.width / 2.0, y + dims.height / 2.0, fs, WHITE);
+            }
         }
     }
 

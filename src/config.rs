@@ -339,3 +339,23 @@ pub fn parse_keys(action: &str, list: Option<&KeyList>, fallback: Option<&KeyLis
     }
     out
 }
+
+/// Файл рекорда (рядом с config.ron).
+pub fn hiscore_path(dir: &Path) -> PathBuf {
+    let p = dir.join("hiscore.txt");
+    p.strip_prefix(".").map(|x| x.to_path_buf()).unwrap_or(p)
+}
+
+/// Рекорд из файла; нет файла или мусор — 0.
+pub fn load_hiscore(path: &Path) -> u32 {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+pub fn save_hiscore(path: &Path, value: u32) {
+    if let Err(e) = fs::write(path, format!("{value}\n")) {
+        eprintln!("Не удалось сохранить рекорд в {}: {e}", path.display());
+    }
+}

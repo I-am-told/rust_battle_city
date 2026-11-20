@@ -249,12 +249,19 @@ impl Tank {
 
     fn base_enemy_color(&self) -> Color {
         match self.kind {
-            Some(EnemyKind::Basic)   => Color::new(0.85, 0.25, 0.2, 1.0),
-            Some(EnemyKind::Fast)    => ORANGE,
-            // Не зелёный — чтобы не путать с P2.
-            Some(EnemyKind::Power)   => Color::new(0.95, 0.4, 0.7, 1.0),
-            Some(EnemyKind::Armored) => Color::new(0.55, 0.55, 0.6, 1.0),
+            Some(k) => enemy_color(k),
             None => RED,
         }
+    }
+}
+
+/// Цвет врага по типу (и для значков на экране подсчёта).
+pub fn enemy_color(kind: EnemyKind) -> Color {
+    match kind {
+        EnemyKind::Basic   => Color::new(0.85, 0.25, 0.2, 1.0),
+        EnemyKind::Fast    => ORANGE,
+        // Не зелёный — чтобы не путать с P2.
+        EnemyKind::Power   => Color::new(0.95, 0.4, 0.7, 1.0),
+        EnemyKind::Armored => Color::new(0.55, 0.55, 0.6, 1.0),
     }
 }

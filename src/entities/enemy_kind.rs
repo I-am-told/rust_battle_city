@@ -11,6 +11,11 @@ impl EnemyKind {
         [EnemyKind::Basic, EnemyKind::Fast, EnemyKind::Power, EnemyKind::Armored]
     }
 
+    /// Номер типа (0..4) — порядок как в `all()`.
+    pub fn index(self) -> usize {
+        Self::all().iter().position(|k| *k == self).unwrap_or(0)
+    }
+
     /// Множитель скорости танка относительно базовой скорости врага.
     pub fn speed_mult(self) -> f32 {
         match self {
@@ -38,7 +43,7 @@ impl EnemyKind {
         }
     }
 
-    /// Очки за убийство (на будущее — система очков).
+    /// Очки за уничтожение (как в оригинале).
     pub fn score(self) -> u32 {
         match self {
             EnemyKind::Basic  => 100,

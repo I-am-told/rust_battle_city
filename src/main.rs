@@ -14,7 +14,7 @@ use crate::ui_text::{draw_text, measure_text};
 use config::load_config;
 use game::state::{Game, GameState};
 use input::{any_down, any_pressed, warn_conflicts, KeyBindings, SystemBindings};
-use config::{config_dir, keys_file_path, load_keys_file, PlayerKeys};
+use config::{config_dir, hiscore_path, keys_file_path, load_hiscore, load_keys_file, save_hiscore, PlayerKeys};
 use menu::{Menu, MenuAction};
 use std::rc::Rc;
 
@@ -66,7 +66,11 @@ async fn main() {
 
     let mut audio = sound::Audio::load(cfg.sound_volume, cfg.engine_sound).await;
 
-    let mut screen = Screen::Menu(Menu::new(0, &keys_path));
+    // Рекорд хранится в hiscore.txt рядом с config.ron.
+    let hiscore_file = hiscore_path(&config_dir());
+    let mut hiscore = load_hiscore(&hiscore_file);
+
+    let mut screen = Screen::Menu(Menu::new(0, &keys_path, hiscore));
     // Последний выбор в меню (после GAME OVER курсор стоит на нём).
     let mut last_menu_choice: usize = 0;
     // Сколько секунд удерживается клавиша выхода.
@@ -107,7 +111,7 @@ async fn main() {
                         cfg.grid_width,
                         cfg.grid_height,
                     );
-                    next = Some(Screen::Game(Box::new(Game::new(&cfg, keys, Rc::new(lv)))));
+                    next = Some(Screen::Game(Box::new(Game::new(&cfg, keys, Rc::new(lv), hiscore))));
                 }
                 audio.set_engine(false);
                 menu.draw(&all_keys);
@@ -122,7 +126,7 @@ async fn main() {
                     match game.state {
                         GameState::Victory => game.advance_level(&cfg),
                         GameState::Defeat => {
-                            next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path)));
+                            next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path, hiscore)));
                         }
                         GameState::Playing => game.toggle_pause(),
                     }
@@ -138,6 +142,12 @@ async fn main() {
                     }
                 }
                 audio.set_engine(game.player_moving());
+                // Новый рекорд сохраняем, когда уровень закончился
+                // (победа или поражение), а не на каждом выстреле.
+                if game.state != GameState::Playing && game.hiscore > hiscore {
+                    hiscore = game.hiscore;
+                    save_hiscore(&hiscore_file, hiscore);
+                }
                 game.draw();
                 draw_quit_hint(game.paused, &sys, quit_held);
             }
