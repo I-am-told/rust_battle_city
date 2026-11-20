@@ -50,6 +50,15 @@
         fire:  ["Space"],
     ),
 
+    // Привязки клавиш для игрока 2 (те же правила).
+    player2_keys: (
+        up:    ["Up"],
+        down:  ["Down"],
+        left:  ["Left"],
+        right: ["Right"],
+        fire:  ["RCtrl", "Slash"],
+    ),
+
     // Общие клавиши.
     system_keys: (
         // Пауза во время игры, следующий уровень, новая игра (как Start на Dandy).

@@ -61,6 +61,8 @@ pub struct Tank {
     pub ai_dir_timer: f32,
     pub ai_shoot_timer: f32,
     pub turn_assist: TurnAssist,
+    /// Номер игрока (0 — P1, 1 — P2); для врагов не используется.
+    pub player_slot: u8,
     /// Точка, к которой танк плавно доезжает при повороте (режим Smooth).
     pub slide_target: Option<Vec2>,
     pub slide_speed: f32,
@@ -90,6 +92,7 @@ impl Tank {
             ai_dir_timer: 0.0,
             ai_shoot_timer: 0.0,
             turn_assist: TurnAssist::Off,
+            player_slot: 0,
             slide_target: None,
             slide_speed: 0.0,
         }

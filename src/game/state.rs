@@ -1,6 +1,6 @@
 use macroquad::prelude::*;
 use crate::config::Config;
-use crate::input::{DirectionInput, KeyBindings};
+use crate::input::KeyBindings;
 use crate::map::GameMap;
 use crate::entities::tank::{Tank, Direction, TurnAssist};
 use crate::entities::bullet::Bullet;
@@ -8,12 +8,16 @@ use crate::entities::spawner::EnemySpawner;
 use crate::entities::bonus::Bonus;
 use crate::game::bonuses::apply_bonus;
 use crate::game::level::LevelConfig;
+use crate::game::player::{Player, PLAYER_ID_BASE};
 
 pub const BONUS_LIFETIME: f32 = 15.0;
 pub const MAX_RANK: u8 = 3;
 /// Сколько секунд игра продолжается после гибели последнего врага
 /// (как в оригинале — можно успеть подобрать бонус).
 pub const VICTORY_DELAY: f32 = 5.0;
+/// Запасные жизни на старте — на каждого игрока (как в оригинале: «IP 2»).
+/// Запас общий: при двух игроках на старте 4.
+pub const START_LIVES_PER_PLAYER: u32 = 2;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum GameState {
@@ -25,19 +29,16 @@ pub enum GameState {
 pub struct Game {
     pub tile_size: f32,
     pub tank_size: f32,
-    pub keys_p1: KeyBindings,
-    pub dir_input_p1: DirectionInput,
     pub bullet_speed: f32,
     pub bullet_size: f32,
     pub tank_speed: f32,
 
     pub map: GameMap,
-    pub player: Tank,
-    pub player_spawn: Vec2,
-    pub player_spawn_tile: IVec2,
-    pub player_lives: u32,
-    pub respawn_timer: f32,
-    pub invuln_timer: f32,
+    /// Игроки (1 или 2). Индекс = номер игрока - 1.
+    pub players: Vec<Player>,
+    /// Общий запас жизней (не считая танков на поле).
+    /// Гибель ничего не списывает — жизнь тратится в момент возрождения.
+    pub lives: u32,
 
     pub enemies: Vec<Tank>,
     pub spawner: EnemySpawner,
@@ -57,26 +58,26 @@ pub struct Game {
     pub picked_bonuses: u32,
     /// Текущий уровень (1-based). При победе увеличивается.
     pub current_level: u32,
-    /// Конфиг (нужен для пересоздания карты/спавнера при переходе на след. уровень).
-    pub cfg_grid_width: i32,
-    pub cfg_grid_height: i32,
 }
 
 impl Game {
-    /// Клавиши разбираются один раз в main и передаются сюда,
-    /// чтобы предупреждения о кривых клавишах не повторялись каждый уровень.
-    pub fn new(cfg: &Config, keys_p1: KeyBindings) -> Self {
-        Self::new_with_progress(cfg, keys_p1, 1, 3, 0)
+    /// Новая игра с 1-го уровня. Число игроков = длина `keys` (1 или 2).
+    /// Клавиши разбираются один раз в main, чтобы предупреждения
+    /// о кривых клавишах не повторялись каждый уровень.
+    pub fn new(cfg: &Config, keys: Vec<KeyBindings>) -> Self {
+        let n = keys.len() as u32;
+        let ranks = vec![0; keys.len()];
+        Self::new_with_progress(cfg, keys, 1, START_LIVES_PER_PLAYER * n, ranks)
     }
 
-    /// Создаёт игру на уровне `level`, с сохранением прогресса
-    /// (жизни и ранг игрока переносятся между уровнями).
+    /// Создаёт игру на уровне `level` с сохранением прогресса:
+    /// общий запас жизней и ранг каждого игрока.
     pub fn new_with_progress(
         cfg: &Config,
-        keys_p1: KeyBindings,
+        keys: Vec<KeyBindings>,
         level: u32,
-        player_lives: u32,
-        player_rank: u8,
+        lives: u32,
+        ranks: Vec<u8>,
     ) -> Self {
         let map = GameMap::new(cfg.grid_width, cfg.grid_height);
         let tank_size = cfg.tile_size * 2.0;
@@ -85,35 +86,41 @@ impl Game {
         let bullet_speed_px = cfg.bullet_speed * cfg.tile_size;
         let bullet_size_px = cfg.bullet_size * cfg.tile_size;
 
-        let player_spawn_tile = {
-            if let Some(base) = map.base_origin {
-                let x = (base.x - 4).max(0);
-                let y = (base.y - 1).max(0);
-                ivec2(x, y)
-            } else {
-                ivec2(1, cfg.grid_height - 3)
-            }
-        };
-        let player_spawn = vec2(
-            player_spawn_tile.x as f32 * cfg.tile_size,
-            player_spawn_tile.y as f32 * cfg.tile_size,
-        );
-
-        let mut player = Tank::new(
-            player_spawn,
-            Direction::Up,
-            tank_size,
-            tank_speed_px,
-        );
-        player.id = 0;
-        player.turn_assist = TurnAssist::parse(&cfg.turn_assist).unwrap_or_else(|| {
+        let turn_assist = TurnAssist::parse(&cfg.turn_assist).unwrap_or_else(|| {
             eprintln!(
                 "Неизвестный turn_assist '{}' (варианты: off, jump, smooth) — беру smooth.",
                 cfg.turn_assist
             );
             TurnAssist::Smooth
         });
-        player.apply_rank(player_rank);
+
+        // Точки появления игроков: как в оригинале — слева (P1)
+        // и справа (P2) от штаба, через 2 тайла от стены.
+        let spawn_tiles: Vec<IVec2> = match map.base_origin {
+            Some(base) => vec![
+                ivec2((base.x - 4).max(0), (base.y - 1).max(0)),
+                ivec2((base.x + 4).min(cfg.grid_width - 2), (base.y - 1).max(0)),
+            ],
+            None => vec![
+                ivec2(1, cfg.grid_height - 3),
+                ivec2(cfg.grid_width - 3, cfg.grid_height - 3),
+            ],
+        };
+
+        let players: Vec<Player> = keys
+            .into_iter()
+            .enumerate()
+            .map(|(i, k)| {
+                let tile = spawn_tiles[i.min(spawn_tiles.len() - 1)];
+                let pos = vec2(tile.x as f32 * cfg.tile_size, tile.y as f32 * cfg.tile_size);
+                let mut tank = Tank::new(pos, Direction::Up, tank_size, tank_speed_px);
+                tank.id = PLAYER_ID_BASE + i as u32;
+                tank.player_slot = i as u8;
+                tank.turn_assist = turn_assist;
+                tank.apply_rank(ranks.get(i).copied().unwrap_or(0));
+                Player::new(tank, k, tile, cfg.tile_size)
+            })
+            .collect();
 
         let level_cfg = LevelConfig::for_level(level);
         let spawner = EnemySpawner::new(level_cfg, cfg.grid_width);
@@ -121,18 +128,12 @@ impl Game {
         Self {
             tile_size: cfg.tile_size,
             tank_size,
-            keys_p1,
-            dir_input_p1: DirectionInput::default(),
             bullet_speed: bullet_speed_px,
             bullet_size: bullet_size_px,
             tank_speed: tank_speed_px,
             map,
-            player,
-            player_spawn,
-            player_spawn_tile,
-            player_lives,
-            respawn_timer: 0.0,
-            invuln_timer: 0.0,
+            players,
+            lives,
             enemies: Vec::new(),
             spawner,
             bullets: Vec::new(),
@@ -145,8 +146,6 @@ impl Game {
             victory_timer: None,
             picked_bonuses: 0,
             current_level: level,
-            cfg_grid_width: cfg.grid_width,
-            cfg_grid_height: cfg.grid_height,
         }
     }
 
@@ -171,41 +170,42 @@ impl Game {
         }
     }
 
-    fn player_spawn_occupied(&self) -> bool {
-        let px = self.player_spawn.x;
-        let py = self.player_spawn.y;
-        for e in self.enemies.iter() {
-            if !e.alive { continue; }
-            let dx = (e.pos.x - px).abs();
-            let dy = (e.pos.y - py).abs();
-            if dx < self.tank_size && dy < self.tank_size {
-                return true;
-            }
-        }
-        false
+    /// Занята ли точка появления игрока `idx` живым танком (врагом или напарником).
+    fn spawn_occupied(&self, idx: usize) -> bool {
+        let sp = self.players[idx].spawn;
+        let near = |t: &Tank| {
+            t.alive && (t.pos.x - sp.x).abs() < self.tank_size && (t.pos.y - sp.y).abs() < self.tank_size
+        };
+        self.enemies.iter().any(near)
+            || self.players.iter().enumerate().any(|(j, p)| j != idx && near(&p.tank))
+    }
+
+    /// Все танки: сначала игроки (индексы 0..players.len()), затем враги.
+    fn all_tanks(&self) -> Vec<Tank> {
+        self.players
+            .iter()
+            .map(|p| p.tank.clone())
+            .chain(self.enemies.iter().cloned())
+            .collect()
     }
 
     fn update_playing(&mut self, dt: f32) {
-        if self.invuln_timer > 0.0 {
-            self.invuln_timer -= dt;
-            if self.invuln_timer <= 0.0 {
-                self.player.invulnerable = false;
-            }
-        }
+        // Защитные поля и возрождение.
+        for i in 0..self.players.len() {
+            self.players[i].tick_shield(dt);
 
-        if !self.player.alive && self.respawn_timer > 0.0 {
-            self.respawn_timer -= dt;
-            if self.respawn_timer <= 0.0 {
-                if self.player_spawn_occupied() {
-                    self.respawn_timer = 0.2;
-                } else {
-                    self.player.pos = self.player_spawn;
-                    self.player.slide_target = None;
-                    self.player.direction = Direction::Up;
-                    self.player.alive = true;
-                    self.player.invulnerable = true;
-                    self.invuln_timer = 3.0;
-                }
+            let Some(t) = self.players[i].respawn_timer else { continue };
+            let t = t - dt;
+            if t > 0.0 {
+                self.players[i].respawn_timer = Some(t);
+            } else if self.lives == 0 {
+                // Жизней нет — ждём: вдруг напарник подберёт «+».
+                self.players[i].respawn_timer = Some(0.0);
+            } else if self.spawn_occupied(i) {
+                self.players[i].respawn_timer = Some(0.2);
+            } else {
+                self.lives -= 1;
+                self.players[i].respawn();
             }
         }
 
@@ -229,31 +229,31 @@ impl Game {
         // Снимок всех танков для проверок столкновений. После движения
         // каждого танка его позиция в снимке обновляется, чтобы следующие
         // танки видели актуальное положение и не въезжали друг в друга.
-        // Индекс 0 — игрок, индекс i + 1 — враг i.
-        let mut snapshot: Vec<Tank> = std::iter::once(self.player.clone())
-            .chain(self.enemies.iter().cloned())
-            .collect();
+        let np = self.players.len();
+        let mut snapshot = self.all_tanks();
 
-        let desired = self.dir_input_p1.update(&self.keys_p1);
-        self.player.update(dt, desired, &self.map, &snapshot, self.tile_size);
-        snapshot[0].pos = self.player.pos;
-        snapshot[0].direction = self.player.direction;
+        for (i, p) in self.players.iter_mut().enumerate() {
+            let desired = p.dir_input.update(&p.keys);
+            p.tank.update(dt, desired, &self.map, &snapshot, self.tile_size);
+            snapshot[i].pos = p.tank.pos;
+            snapshot[i].direction = p.tank.direction;
 
-        // Мёртвый игрок (ожидание возрождения) не стреляет.
-        if self.player.alive && self.keys_p1.fire_pressed() {
-            let active = self.bullets
-                .iter()
-                .filter(|b| b.alive && b.owner_id == self.player.id)
-                .count() as u8;
-
-            if let Some(bullet) = self.player.try_fire(
-                active,
-                &self.map,
-                self.tile_size,
-                self.bullet_speed,
-                self.bullet_size,
-            ) {
-                self.bullets.push(bullet);
+            // Мёртвый игрок (ожидание возрождения) не стреляет.
+            if p.tank.alive && p.keys.fire_pressed() {
+                let id = p.tank.id;
+                let active = self.bullets
+                    .iter()
+                    .filter(|b| b.alive && b.owner_id == id)
+                    .count() as u8;
+                if let Some(bullet) = p.tank.try_fire(
+                    active,
+                    &self.map,
+                    self.tile_size,
+                    self.bullet_speed,
+                    self.bullet_size,
+                ) {
+                    self.bullets.push(bullet);
+                }
             }
         }
 
@@ -276,14 +276,12 @@ impl Game {
             ) {
                 self.bullets.push(bullet);
             }
-            snapshot[i + 1].pos = enemy.pos;
-            snapshot[i + 1].direction = enemy.direction;
+            snapshot[np + i].pos = enemy.pos;
+            snapshot[np + i].direction = enemy.direction;
         }
 
         let alive_enemies = self.enemies.iter().filter(|e| e.alive).count();
-        let tanks_for_spawn: Vec<Tank> = std::iter::once(self.player.clone())
-            .chain(self.enemies.iter().cloned())
-            .collect();
+        let tanks_for_spawn = self.all_tanks();
 
         if let Some(new_enemy) = self.spawner.update(
             dt,
@@ -291,15 +289,13 @@ impl Game {
             &tanks_for_spawn,
             self.tile_size,
             self.tank_size,
-            self.player.speed * 0.75,
+            self.tank_speed * 0.75,
         ) {
             self.enemies.push(new_enemy);
         }
 
-        let tanks_now: Vec<Tank> = std::iter::once(self.player.clone())
-            .chain(self.enemies.iter().cloned())
-            .collect();
-
+        // Пули. Игроки в одной команде — пули проходят сквозь напарника.
+        let tanks_now = self.all_tanks();
         let mut hit_ids: Vec<u32> = Vec::new();
         for b in self.bullets.iter_mut() {
             if let Some(hit_id) = b.update(dt, &mut self.map, &tanks_now, self.tile_size) {
@@ -312,20 +308,10 @@ impl Game {
 
         let mut pending_bonuses: u32 = 0;
         for id in hit_ids {
-            if id == self.player.id {
-                // Проверка alive: если две пули попали в одном кадре,
-                // вторая не должна отнимать ещё одну жизнь.
-                if self.player.alive && !self.player.invulnerable {
-                    self.player.take_hit();
-                    // Как в оригинале: после гибели ранг (звёзды) сбрасывается.
-                    self.player.apply_rank(0);
-                    self.player_lives = self.player_lives.saturating_sub(1);
-                    if self.player_lives == 0 {
-                        self.state = GameState::Defeat;
-                    } else {
-                        self.respawn_timer = 1.0;
-                    }
-                }
+            if let Some(p) = self.players.iter_mut().find(|p| p.tank.id == id) {
+                // Player::hit сам проверяет alive/invulnerable: вторая пуля
+                // в том же кадре ничего не делает.
+                p.hit();
             } else if let Some(e) = self.enemies.iter_mut().find(|e| e.id == id) {
                 let was_bonus = e.is_bonus;
                 e.take_hit();
@@ -337,7 +323,7 @@ impl Game {
 
         if pending_bonuses > 0 {
             let mut forbidden: Vec<IVec2> = self.spawner.spawn_points().to_vec();
-            forbidden.push(self.player_spawn_tile);
+            forbidden.extend(self.players.iter().map(|p| p.spawn_tile));
 
             for _ in 0..pending_bonuses {
                 if let Some(tile) = self.map.random_bonus_spawn(&forbidden) {
@@ -357,14 +343,19 @@ impl Game {
             b.update(dt);
         }
 
-        if self.player.alive {
-            for b in self.bonuses.iter_mut() {
-                if b.try_pickup(self.player.pos, self.player.size) {
+        // Бонус берёт любой живой игрок; звезда — тому, кто взял,
+        // «+» — в общий запас, остальное действует на всех.
+        for b in self.bonuses.iter_mut() {
+            for p in self.players.iter_mut() {
+                if !p.tank.alive {
+                    continue;
+                }
+                if b.try_pickup(p.tank.pos, p.tank.size) {
                     self.picked_bonuses += 1;
                     apply_bonus(
                         b.kind,
-                        &mut self.player,
-                        &mut self.player_lives,
+                        &mut p.tank,
+                        &mut self.lives,
                         &mut self.enemies,
                         &mut self.map,
                         &mut self.freeze_timer,
@@ -378,17 +369,14 @@ impl Game {
 
         self.bonuses.retain(|b| b.alive);
 
-        // Поражение по жизням могло выставиться выше в этом же кадре —
-        // тогда победу не проверяем, чтобы не перезаписать Defeat.
-        if self.state != GameState::Playing {
-            return;
-        }
-        if self.map.base_destroyed {
+        // Поражение: штаб уничтожен, или все игроки погибли и жизней нет.
+        let anyone_alive = self.players.iter().any(|p| p.tank.alive);
+        if self.map.base_destroyed || (!anyone_alive && self.lives == 0) {
             self.state = GameState::Defeat;
         } else if self.spawner.remaining_to_spawn == 0 && self.enemies.is_empty() {
             // Враги кончились — игра идёт ещё VICTORY_DELAY секунд, потом победа.
-            // Поражение в это время (база, последняя жизнь) всё ещё возможно —
-            // оно выставляется выше и раньше.
+            // Поражение в это время (штаб, последняя жизнь) всё ещё возможно —
+            // оно проверяется выше и раньше.
             let t = self.victory_timer.get_or_insert(VICTORY_DELAY);
             *t -= dt;
             if *t <= 0.0 {
@@ -397,13 +385,27 @@ impl Game {
         }
     }
 
-    /// Переход на следующий уровень: жизни и ранг сохраняются.
+    /// Переход на следующий уровень: общий запас жизней и ранги сохраняются.
+    /// Все игроки выходят на новый уровень, даже если ждали возрождения.
     pub fn advance_level(&mut self, cfg: &Config) {
         let next_level = self.current_level + 1;
-        let lives = self.player_lives;
-        let rank = self.player.rank;
-        let keys = self.keys_p1.clone();
-        *self = Self::new_with_progress(cfg, keys, next_level, lives, rank);
+        let ranks: Vec<u8> = self.players.iter().map(|p| p.tank.rank).collect();
+        let keys: Vec<KeyBindings> = self.players.iter().map(|p| p.keys.clone()).collect();
+        *self = Self::new_with_progress(cfg, keys, next_level, self.lives, ranks);
+    }
+
+    /// Строка рангов для HUD: "RANK: 2" или "RANK P1: 2  P2: 0".
+    fn rank_text(&self) -> String {
+        if self.players.len() == 1 {
+            return format!("RANK: {}", self.players[0].tank.rank);
+        }
+        let parts: Vec<String> = self
+            .players
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("P{}: {}", i + 1, p.tank.rank))
+            .collect();
+        format!("RANK {}", parts.join("  "))
     }
 
     pub fn draw(&self) {
@@ -423,7 +425,7 @@ impl Game {
         for b in self.bonuses.iter() { b.draw(); }
         for b in self.bullets.iter() { b.draw(); }
         for e in self.enemies.iter() { e.draw(); }
-        self.player.draw();
+        for p in self.players.iter() { p.tank.draw(); }
 
         match self.state {
             GameState::Victory => {
@@ -459,7 +461,7 @@ impl Game {
                     fs as f32,
                     RED,
                 );
-                let hint = "Press ENTER for new game";
+                let hint = "Press ENTER for menu";
                 let hfs = 24;
                 let hdims = measure_text(hint, None, hfs, 1.0);
                 draw_text(
@@ -499,7 +501,7 @@ impl Game {
             WHITE,
         );
         draw_text(
-            &format!("LIVES: {}", self.player_lives),
+            &format!("LIVES: {}", self.lives),
             10.0,
             48.0,
             24.0,
@@ -524,7 +526,7 @@ impl Game {
             LIGHTGRAY,
         );
         draw_text(
-            &format!("RANK: {}", self.player.rank),
+            &self.rank_text(),
             10.0,
             120.0,
             20.0,

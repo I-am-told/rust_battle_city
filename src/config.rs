@@ -36,6 +36,7 @@ pub struct PlayerKeys {
 }
 
 impl Default for PlayerKeys {
+    /// Раскладка игрока 1 по умолчанию.
     fn default() -> Self {
         Self {
             up: KeyList::many(&["W"]),
@@ -43,6 +44,19 @@ impl Default for PlayerKeys {
             left: KeyList::many(&["A"]),
             right: KeyList::many(&["D"]),
             fire: KeyList::many(&["Space"]),
+        }
+    }
+}
+
+impl PlayerKeys {
+    /// Раскладка игрока 2 по умолчанию: стрелки + правый Ctrl или «/».
+    pub fn player2_default() -> Self {
+        Self {
+            up: KeyList::many(&["Up"]),
+            down: KeyList::many(&["Down"]),
+            left: KeyList::many(&["Left"]),
+            right: KeyList::many(&["Right"]),
+            fire: KeyList::many(&["RCtrl", "Slash"]),
         }
     }
 }
@@ -89,6 +103,7 @@ pub struct Config {
     /// Помощь при повороте: "off" | "jump" | "smooth".
     pub turn_assist: String,
     pub player1_keys: PlayerKeys,
+    pub player2_keys: PlayerKeys,
     pub system_keys: SystemKeys,
 }
 
@@ -104,6 +119,7 @@ impl Default for Config {
             bullet_size: 0.2,
             turn_assist: "smooth".into(),
             player1_keys: PlayerKeys::default(),
+            player2_keys: PlayerKeys::player2_default(),
             system_keys: SystemKeys::default(),
         }
     }

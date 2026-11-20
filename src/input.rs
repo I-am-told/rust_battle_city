@@ -20,20 +20,19 @@ pub struct KeyBindings {
     pub fire: Vec<KeyCode>,
 }
 
-impl From<&PlayerKeys> for KeyBindings {
-    fn from(pk: &PlayerKeys) -> Self {
-        let d = PlayerKeys::default();
+impl KeyBindings {
+    /// Разбирает клавиши игрока из конфига. `who` — для сообщений ("P1"),
+    /// `d` — раскладка по умолчанию на случай кривых клавиш.
+    pub fn from_config(who: &str, pk: &PlayerKeys, d: &PlayerKeys) -> Self {
         Self {
-            up:    parse_keys("up", &pk.up, &d.up),
-            down:  parse_keys("down", &pk.down, &d.down),
-            left:  parse_keys("left", &pk.left, &d.left),
-            right: parse_keys("right", &pk.right, &d.right),
-            fire:  parse_keys("fire", &pk.fire, &d.fire),
+            up:    parse_keys(&format!("{who} up"), &pk.up, &d.up),
+            down:  parse_keys(&format!("{who} down"), &pk.down, &d.down),
+            left:  parse_keys(&format!("{who} left"), &pk.left, &d.left),
+            right: parse_keys(&format!("{who} right"), &pk.right, &d.right),
+            fire:  parse_keys(&format!("{who} fire"), &pk.fire, &d.fire),
         }
     }
-}
 
-impl KeyBindings {
     fn keys_for(&self, d: Direction) -> &[KeyCode] {
         match d {
             Direction::Up => &self.up,
@@ -47,18 +46,38 @@ impl KeyBindings {
         any_pressed(&self.fire)
     }
 
+    pub fn up_pressed(&self) -> bool {
+        any_pressed(&self.up)
+    }
+
+    pub fn down_pressed(&self) -> bool {
+        any_pressed(&self.down)
+    }
+
     /// Все пары (действие, клавиша) — для поиска конфликтов.
-    fn all(&self) -> Vec<(&'static str, KeyCode)> {
+    fn all(&self, who: &str) -> Vec<(String, KeyCode)> {
         let mut v = Vec::new();
         for (name, keys) in [
             ("up", &self.up), ("down", &self.down), ("left", &self.left),
             ("right", &self.right), ("fire", &self.fire),
         ] {
             for k in keys {
-                v.push((name, *k));
+                v.push((format!("{who} {name}"), *k));
             }
         }
         v
+    }
+
+    /// Короткое описание для экрана меню: "W/S/A/D, fire: Space".
+    pub fn describe(&self) -> String {
+        let names = |keys: &[KeyCode]| {
+            keys.iter().map(|k| format!("{k:?}")).collect::<Vec<_>>().join("|")
+        };
+        format!(
+            "{}/{}/{}/{}  fire: {}",
+            names(&self.up), names(&self.down), names(&self.left),
+            names(&self.right), names(&self.fire)
+        )
     }
 }
 
@@ -82,10 +101,13 @@ impl From<&SystemKeys> for SystemBindings {
 }
 
 /// Предупреждает, если одна клавиша назначена на несколько действий.
-pub fn warn_conflicts(player: &KeyBindings, system: &SystemBindings) {
-    let mut all = player.all();
-    for k in &system.start { all.push(("start", *k)); }
-    for k in &system.quit { all.push(("quit", *k)); }
+pub fn warn_conflicts(players: &[KeyBindings], system: &SystemBindings) {
+    let mut all: Vec<(String, KeyCode)> = Vec::new();
+    for (i, p) in players.iter().enumerate() {
+        all.extend(p.all(&format!("P{}", i + 1)));
+    }
+    for k in &system.start { all.push(("start".into(), *k)); }
+    for k in &system.quit { all.push(("quit".into(), *k)); }
     for i in 0..all.len() {
         for j in (i + 1)..all.len() {
             if all[i].1 == all[j].1 && all[i].0 != all[j].0 {

@@ -3,11 +3,20 @@ mod input;
 mod map;
 mod entities;
 mod game;
+mod menu;
 
 use macroquad::prelude::*;
 use config::load_config;
 use game::state::{Game, GameState};
 use input::{any_down, any_pressed, warn_conflicts, KeyBindings, SystemBindings};
+use config::PlayerKeys;
+use menu::{Menu, MenuAction};
+
+/// Текущий экран.
+enum Screen {
+    Menu(Menu),
+    Game(Box<Game>),
+}
 
 #[macroquad::main("Battle City (Rust)")]
 async fn main() {
@@ -21,8 +30,12 @@ async fn main() {
 
     let cfg = load_config();
     let sys: SystemBindings = (&cfg.system_keys).into();
-    let p1: KeyBindings = (&cfg.player1_keys).into();
-    warn_conflicts(&p1, &sys);
+    // Клавиши обоих игроков (в игре на одного используются только P1).
+    let all_keys: Vec<KeyBindings> = vec![
+        KeyBindings::from_config("P1", &cfg.player1_keys, &PlayerKeys::default()),
+        KeyBindings::from_config("P2", &cfg.player2_keys, &PlayerKeys::player2_default()),
+    ];
+    warn_conflicts(&all_keys, &sys);
 
     let playfield_w = cfg.tile_size * cfg.grid_width as f32;
     let playfield_h = cfg.tile_size * cfg.grid_height as f32;
@@ -30,7 +43,9 @@ async fn main() {
     let scale = if cfg.window_scale > 0.0 { cfg.window_scale } else { 1.0 };
     request_new_screen_size(playfield_w * scale, playfield_h * scale);
 
-    let mut game = Game::new(&cfg, p1.clone());
+    let mut screen = Screen::Menu(Menu::new());
+    // Последний выбор в меню (после GAME OVER курсор стоит на нём).
+    let mut last_menu_choice: usize = 0;
     // Сколько секунд удерживается клавиша выхода.
     let mut quit_held: f32 = 0.0;
 
@@ -43,7 +58,9 @@ async fn main() {
             if sys.quit_hold_seconds <= 0.0 {
                 break;
             }
-            game.pause();
+            if let Screen::Game(game) = &mut screen {
+                game.pause();
+            }
         }
         if any_down(&sys.quit) {
             quit_held += dt;
@@ -54,32 +71,50 @@ async fn main() {
             quit_held = 0.0;
         }
 
-        // Start (по умолчанию Enter или P):
-        // - во время игры — пауза / продолжить (как Start на Dandy)
-        // - Victory → следующий уровень (жизни и ранг сохраняются)
-        // - Defeat → новая игра с 1-го уровня
-        if any_pressed(&sys.start) {
-            match game.state {
-                GameState::Victory => game.advance_level(&cfg),
-                GameState::Defeat => game = Game::new(&cfg, p1.clone()),
-                GameState::Playing => game.toggle_pause(),
+        let mut next: Option<Screen> = None;
+        match &mut screen {
+            Screen::Menu(menu) => {
+                if let Some(MenuAction::Start(n)) = menu.update(&all_keys, &sys) {
+                    last_menu_choice = menu.selected;
+                    let keys = all_keys[..n.min(all_keys.len())].to_vec();
+                    next = Some(Screen::Game(Box::new(Game::new(&cfg, keys))));
+                }
+                menu.draw(&all_keys);
+                draw_quit_hint(false, &sys, quit_held);
+            }
+            Screen::Game(game) => {
+                // Start (по умолчанию Enter или P):
+                // - во время игры — пауза / продолжить (как Start на Dandy)
+                // - Victory → следующий уровень (жизни и ранги сохраняются)
+                // - Defeat → в меню
+                if any_pressed(&sys.start) {
+                    match game.state {
+                        GameState::Victory => game.advance_level(&cfg),
+                        GameState::Defeat => {
+                            next = Some(Screen::Menu(Menu { selected: last_menu_choice }));
+                        }
+                        GameState::Playing => game.toggle_pause(),
+                    }
+                }
+                game.update(dt);
+                game.draw();
+                draw_quit_hint(game.paused, &sys, quit_held);
             }
         }
-
-        game.update(dt);
-        game.draw();
-        draw_quit_hint(&game, &sys, quit_held);
+        if let Some(s) = next {
+            screen = s;
+        }
 
         next_frame().await;
     }
 }
 
 /// Подсказка на паузе и полоска удержания клавиши выхода.
-fn draw_quit_hint(game: &Game, sys: &SystemBindings, quit_held: f32) {
+fn draw_quit_hint(paused: bool, sys: &SystemBindings, quit_held: f32) {
     if sys.quit_hold_seconds <= 0.0 {
         return;
     }
-    let show = game.paused || quit_held > 0.0;
+    let show = paused || quit_held > 0.0;
     if !show {
         return;
     }
