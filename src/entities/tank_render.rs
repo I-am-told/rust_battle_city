@@ -11,11 +11,13 @@ impl Tank {
             if phase != 0 { return; }
         }
 
-        // Цвет корпуса.
+        // Цвет корпуса: замороженные враги — голубые.
         let color = match self.team {
             Team::Player => GREEN,
             Team::Enemy => {
-                if self.is_bonus {
+                if self.frozen {
+                    SKYBLUE
+                } else if self.is_bonus {
                     let phase = ((get_time() * 5.0) as i32) % 2;
                     if phase == 0 { PURPLE } else { RED }
                 } else {
@@ -33,7 +35,7 @@ impl Tank {
         let tip = center + vec2(v.x as f32, v.y as f32) * (self.size / 2.0);
         draw_line(center.x, center.y, tip.x, tip.y, self.size * 0.2, WHITE);
 
-        // Маркеры ранга у игрока: маленькие белые кружки вдоль верха танка.
+        // Маркеры ранга у игрока.
         if self.team == Team::Player && self.rank > 0 {
             let n = self.rank as i32;
             let r = self.size * 0.07;

@@ -33,7 +33,7 @@ impl GameMap {
             }
         }
 
-        // Тестовые стальные блоки (для проверки пробоя на 3-м ранге).
+        // Тестовые стальные блоки.
         for x in 8..10 {
             for y in 2..4 {
                 tiles[(x + y * width) as usize] = Tile::Steel;
@@ -132,6 +132,53 @@ impl GameMap {
             }
         }
         self.base_destroyed = true;
+    }
+
+    /// Временная стальная стена вокруг базы (эффект "лопата").
+    /// Возвращает список тайлов, где была поставлена сталь.
+    pub fn apply_shovel(&mut self) -> Vec<IVec2> {
+        let mut tiles_changed: Vec<IVec2> = Vec::new();
+        let base = match self.base_origin {
+            Some(b) => b,
+            None => return tiles_changed,
+        };
+        let base_x = base.x;
+        let base_y = base.y;
+
+        let mut set_tile = |map: &mut GameMap, x: i32, y: i32, out: &mut Vec<IVec2>| {
+            if x < 0 || x >= map.width || y < 0 || y >= map.height {
+                return;
+            }
+            map.tiles[(x + y * map.width) as usize] = Tile::Steel;
+            out.push(ivec2(x, y));
+        };
+
+        let top_y = base_y - 1;
+        for x in (base_x - 1)..=(base_x + 2) {
+            set_tile(self, x, top_y, &mut tiles_changed);
+        }
+        for y in base_y..(base_y + 2) {
+            set_tile(self, base_x - 1, y, &mut tiles_changed);
+        }
+        for y in base_y..(base_y + 2) {
+            set_tile(self, base_x + 2, y, &mut tiles_changed);
+        }
+
+        tiles_changed
+    }
+
+    /// Возвращает кирпичи на места, где была сталь после лопаты.
+    /// Только если там всё ещё Steel (если сталь разрушили — оставляем как есть).
+    /// Возвращает кирпичи на места, где была сталь после лопаты.
+    /// Восстанавливает стену ПОЛНОСТЬЮ, даже если сталь была разрушена —
+    /// это соответствует поведению лопаты в оригинале ("чинит" стену).
+    pub fn remove_shovel(&mut self, tiles: &[IVec2]) {
+        for t in tiles {
+            if t.x < 0 || t.x >= self.width || t.y < 0 || t.y >= self.height {
+                continue;
+            }
+            self.tiles[(t.x + t.y * self.width) as usize] = Tile::Brick;
+        }
     }
 
     pub fn random_bonus_spawn(&self, forbidden: &[IVec2]) -> Option<IVec2> {

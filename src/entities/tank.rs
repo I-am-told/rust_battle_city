@@ -3,8 +3,6 @@ use crate::input::KeyBindings;
 use crate::map::GameMap;
 use crate::entities::bullet::Bullet;
 
-// Реэкспорт Direction, чтобы старые импорты
-// `crate::entities::tank::Direction` продолжали работать.
 pub use crate::entities::direction::Direction;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -26,8 +24,9 @@ pub struct Tank {
     pub alive: bool,
     pub invulnerable: bool,
     pub is_bonus: bool,
+    /// Заморожен ли танк (бонус "таймер"). Пока true — не двигается и не стреляет.
+    pub frozen: bool,
     /// Ранг танка (для игрока).
-    /// Управляет max_active_bullets, pierces_steel, bullet_speed_multiplier.
     pub rank: u8,
     /// Множитель скорости пули. 1.0 — базовая, 1.5 — на ранге 1+.
     pub bullet_speed_multiplier: f32,
@@ -50,6 +49,7 @@ impl Tank {
             alive: true,
             invulnerable: false,
             is_bonus: false,
+            frozen: false,
             rank: 0,
             bullet_speed_multiplier: 1.0,
             ai_dir_timer: 0.0,
@@ -74,13 +74,6 @@ impl Tank {
         t
     }
 
-    /// Устанавливает ранг и пересчитывает характеристики.
-    /// Таблица (классика + задел):
-    ///   0 — базовая скорость пули, 1 пуля, без пробоя
-    ///   1 — +50% скорость пули
-    ///   2 — +50% скорость пули, 2 пули
-    ///   3 — +50% скорость пули, 2 пули, пробитие стали
-    ///   >3 — как 3
     pub fn apply_rank(&mut self, rank: u8) {
         self.rank = rank;
         match rank {
@@ -232,6 +225,10 @@ impl Tank {
         active_bullets: u8,
     ) -> Option<Bullet> {
         if !self.alive {
+            return None;
+        }
+        // Замороженный враг не двигается и не стреляет.
+        if self.frozen {
             return None;
         }
 

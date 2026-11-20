@@ -1,15 +1,18 @@
-use crate::entities::tank::{Tank, Team};
+use macroquad::prelude::*;
+use crate::entities::tank::Tank;
 use crate::entities::bonus::BonusKind;
+use crate::map::GameMap;
 
 /// Применяет эффект подобранного бонуса.
-/// Возвращает `true`, если игрок (или игровое состояние) изменились настолько,
-/// что это стоит перерисовать — но это необязательно, сейчас просто для
-/// логирования и задела.
 pub fn apply_bonus(
     kind: BonusKind,
     player: &mut Tank,
     player_lives: &mut u32,
     enemies: &mut Vec<Tank>,
+    map: &mut GameMap,
+    freeze_timer: &mut f32,
+    shovel_timer: &mut f32,
+    shovel_tiles: &mut Vec<IVec2>,
     max_rank: u8,
 ) {
     match kind {
@@ -40,13 +43,18 @@ pub fn apply_bonus(
             println!("Grenade! Killed {} enemies", killed);
         }
         BonusKind::Timer => {
-            println!("Timer picked (effect pending)");
+            *freeze_timer = 10.0;
+            println!("Timer picked! Enemies frozen for 10s");
         }
         BonusKind::Shovel => {
-            println!("Shovel picked (effect pending)");
+            // Если лопата уже активна — снимаем старую, потом ставим новую.
+            if *shovel_timer > 0.0 {
+                map.remove_shovel(shovel_tiles);
+                shovel_tiles.clear();
+            }
+            *shovel_timer = 10.0;
+            *shovel_tiles = map.apply_shovel();
+            println!("Shovel picked! Base wrapped in steel for 10s");
         }
     }
-
-    // Заглушка: Team используется в будущем (для мультиплеера и врагов).
-    let _ = Team::Player;
 }
