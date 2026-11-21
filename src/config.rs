@@ -433,3 +433,49 @@ pub fn save_hiscore(path: &Path, value: u32) {
         eprintln!("Не удалось сохранить рекорд в {}: {e}", path.display());
     }
 }
+
+/// Сложность. Выбирается в меню и запоминается в difficulty.txt.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Difficulty {
+    /// Лёгкая: помощь второму игроку (сыну) — бонусы рядом с ним и
+    /// «умные», граната не трогает бонусного врага, в спину не убить,
+    /// звезда P1 — и ему тоже, его танк виден в лесу.
+    Easy,
+    /// Обычная: как в оригинале.
+    Normal,
+}
+
+impl Difficulty {
+    pub fn label(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "EASY",
+            Difficulty::Normal => "NORMAL",
+        }
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            Difficulty::Easy => Difficulty::Normal,
+            Difficulty::Normal => Difficulty::Easy,
+        }
+    }
+}
+
+pub fn difficulty_path(dir: &Path) -> PathBuf {
+    let p = dir.join("difficulty.txt");
+    p.strip_prefix(".").map(|x| x.to_path_buf()).unwrap_or(p)
+}
+
+/// Сложность из файла; нет файла или непонятное значение — лёгкая.
+pub fn load_difficulty(path: &Path) -> Difficulty {
+    match fs::read_to_string(path).map(|t| t.trim().to_lowercase()) {
+        Ok(t) if t == "normal" => Difficulty::Normal,
+        _ => Difficulty::Easy,
+    }
+}
+
+pub fn save_difficulty(path: &Path, d: Difficulty) {
+    if let Err(e) = fs::write(path, format!("{}\n", d.label().to_lowercase())) {
+        eprintln!("Не удалось сохранить сложность в {}: {e}", path.display());
+    }
+}

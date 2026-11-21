@@ -8,7 +8,7 @@ use crate::entities::bullet::{Bullet, BulletHit, BulletSpec};
 use crate::map::WallHit;
 use crate::sound::Sfx;
 use crate::entities::spawner::EnemySpawner;
-use crate::config::Gameplay;
+use crate::config::{Difficulty, Gameplay};
 use crate::entities::bonus::{Bonus, BonusKind};
 use crate::entities::effects::{draw_spawn_star, Effect, EffectKind};
 use crate::game::level::LevelConfig;
@@ -33,6 +33,8 @@ pub struct Progress {
     pub scores: Vec<u32>,
     /// Рекорд (лучший результат за всё время).
     pub hiscore: u32,
+    /// Сложность (переносится между уровнями).
+    pub difficulty: Difficulty,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -88,13 +90,21 @@ pub struct Game {
     pub hiscore: u32,
     /// Настройки игрового процесса из config.ron.
     pub tuning: Gameplay,
+    /// Сложность.
+    pub difficulty: Difficulty,
 }
 
 impl Game {
     /// Новая игра с 1-го уровня. Число игроков = длина `keys` (1 или 2).
     /// Клавиши разбираются один раз в main, чтобы предупреждения
     /// о кривых клавишах не повторялись каждый уровень.
-    pub fn new(cfg: &Config, keys: Vec<KeyBindings>, levels: Rc<LevelSet>, hiscore: u32) -> Self {
+    pub fn new(
+        cfg: &Config,
+        keys: Vec<KeyBindings>,
+        levels: Rc<LevelSet>,
+        hiscore: u32,
+        difficulty: Difficulty,
+    ) -> Self {
         let n = keys.len();
         let progress = Progress {
             level: 1,
@@ -103,6 +113,7 @@ impl Game {
             ranks: vec![0; n],
             scores: vec![0; n],
             hiscore,
+            difficulty,
         };
         Self::new_with_progress(cfg, keys, levels, progress)
     }
@@ -115,7 +126,7 @@ impl Game {
         levels: Rc<LevelSet>,
         progress: Progress,
     ) -> Self {
-        let Progress { level, lives, ranks, scores, hiscore } = progress;
+        let Progress { level, lives, ranks, scores, hiscore, difficulty } = progress;
         let layout = levels.layout_for(level);
         let from_file = layout.is_some();
         let mut map = GameMap::with_layout(cfg.grid_width, cfg.grid_height, layout);
@@ -217,6 +228,7 @@ impl Game {
             levels,
             hiscore,
             tuning: cfg.gameplay,
+            difficulty,
         }
     }
 
@@ -430,10 +442,11 @@ impl Game {
         // Пули. Игроки в одной команде — пули проходят сквозь напарника.
         let tanks_now = self.all_tanks();
         // (в кого попали, чья пуля)
-        let mut hit_ids: Vec<(u32, u32)> = Vec::new();
+        // (в кого попали, чья пуля, куда летела)
+        let mut hit_ids: Vec<(u32, u32, Direction)> = Vec::new();
         for b in self.bullets.iter_mut() {
             if let Some(hit_id) = b.update(dt, &mut self.map, &tanks_now, self.tile_size) {
-                hit_ids.push((hit_id, b.owner_id));
+                hit_ids.push((hit_id, b.owner_id, b.direction));
             }
         }
 
@@ -469,8 +482,14 @@ impl Game {
         }
 
         let mut pending_bonuses: u32 = 0;
-        for (id, owner) in hit_ids {
+        let son_rules = self.son_rules();
+        for (id, owner, bullet_dir) in hit_ids {
             if let Some(p) = self.players.iter_mut().find(|p| p.tank.id == id) {
+                // Лёгкий режим: сына (P2) не убить в спину — пуля летит
+                // туда же, куда смотрит танк, значит попала сзади.
+                if son_rules && p.tank.player_slot == 1 && bullet_dir == p.tank.direction {
+                    continue;
+                }
                 // Player::hit сам проверяет alive/invulnerable: вторая пуля
                 // в том же кадре ничего не делает.
                 match p.hit() {
@@ -515,12 +534,24 @@ impl Game {
             forbidden.extend(self.players.iter().map(|p| p.spawn_tile));
 
             for _ in 0..pending_bonuses {
-                if let Some(tile) = self.map.random_bonus_spawn(&forbidden) {
+                // Лёгкий режим: бонус появляется рядом с сыном (P2).
+                let spot = match self.son_tile() {
+                    Some(near) if son_rules => self
+                        .map
+                        .bonus_spawn_near(near, &forbidden)
+                        .or_else(|| self.map.random_bonus_spawn(&forbidden)),
+                    _ => self.map.random_bonus_spawn(&forbidden),
+                };
+                if let Some(tile) = spot {
                     let pos = vec2(
                         tile.x as f32 * self.tile_size,
                         tile.y as f32 * self.tile_size,
                     );
-                    self.bonuses.push(Bonus::new(pos, self.tank_size, self.tuning.bonus_lifetime));
+                    let mut bonus = Bonus::new(pos, self.tank_size, self.tuning.bonus_lifetime);
+                    if son_rules {
+                        bonus.kind = self.easy_bonus_kind();
+                    }
+                    self.bonuses.push(bonus);
                     self.sfx.push(Sfx::BonusAppear);
                     forbidden.push(tile);
                 }
@@ -579,6 +610,58 @@ impl Game {
                 self.state = GameState::Victory;
             }
         }
+    }
+
+    /// Правила лёгкого режима — только когда играют вдвоём: всё помогает
+    /// второму игроку (сыну). В игре на одного лёгкий режим = обычный.
+    pub fn son_rules(&self) -> bool {
+        self.difficulty == Difficulty::Easy && self.players.len() >= 2
+    }
+
+    /// Тайл, где сейчас сын (P2), или его точка появления.
+    fn son_tile(&self) -> Option<IVec2> {
+        let p = self.players.get(1)?;
+        let pos = if p.tank.alive { p.tank.pos } else { p.spawn };
+        Some(ivec2(
+            (pos.x / self.tile_size).round() as i32,
+            (pos.y / self.tile_size).round() as i32,
+        ))
+    }
+
+    /// Лёгкий режим: какой бонус выпадет. Помогаем по обстановке:
+    /// - стена штаба < 30% — только лопата;
+    /// - жизней ≤ 1 — только жизнь;
+    /// - иначе случайно, но с перевесом: стена ≤ 50% — сильно больше
+    ///   лопат, ≤ 70% — больше; жизней < 3 — больше жизней; ранг P1 не
+    ///   максимальный — больше звёзд, максимальный — звёзд нет совсем.
+    ///   Порядок важности при всём сразу: штаб, потом жизни, потом звёзды.
+    fn easy_bonus_kind(&self) -> BonusKind {
+        let wall = self.map.base_wall_integrity();
+        if wall < 0.3 {
+            return BonusKind::Shovel;
+        }
+        if self.lives <= 1 {
+            return BonusKind::Life;
+        }
+        let p1_max = self.players.first().is_some_and(|p| p.tank.rank >= MAX_RANK);
+        let mut w: Vec<(BonusKind, u32)> = vec![
+            (BonusKind::Star, if p1_max { 0 } else { 1 + 3 }),
+            (BonusKind::Life, if self.lives < 3 { 1 + 4 } else { 1 }),
+            (BonusKind::Grenade, 1),
+            (BonusKind::Timer, 1),
+            (BonusKind::Shovel, if wall <= 0.5 { 1 + 8 } else if wall <= 0.7 { 1 + 2 } else { 1 }),
+            (BonusKind::Helmet, 1),
+        ];
+        w.retain(|(_, x)| *x > 0);
+        let total: u32 = w.iter().map(|(_, x)| x).sum();
+        let mut r = rand::gen_range(0, total);
+        for (k, x) in w {
+            if r < x {
+                return k;
+            }
+            r -= x;
+        }
+        BonusKind::Helmet
     }
 
     /// Ранг 6 — телепорт-защитник. Если вражеская пуля вот-вот попадёт
@@ -675,6 +758,7 @@ impl Game {
             ranks: self.players.iter().map(|p| p.tank.rank).collect(),
             scores: self.players.iter().map(|p| p.score).collect(),
             hiscore: self.hiscore,
+            difficulty: self.difficulty,
         };
         let keys: Vec<KeyBindings> = self.players.iter().map(|p| p.keys.clone()).collect();
         let levels = self.levels.clone();
@@ -744,6 +828,12 @@ impl Game {
         for p in self.players.iter() { p.tank.draw(); }
         // Лес поверх танков и пуль (как в оригинале), бонусы — поверх леса.
         self.map.draw_forest(self.tile_size);
+        // Лёгкий режим: танк сына (P2) виден и в лесу.
+        if self.son_rules() {
+            for p in self.players.iter().filter(|p| p.tank.player_slot == 1) {
+                p.tank.draw();
+            }
+        }
         for b in self.bonuses.iter() { b.draw(); }
         // Звёздочки появления.
         let half = vec2(self.tank_size, self.tank_size) / 2.0;

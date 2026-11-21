@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use macroquad::prelude::*;
 use crate::ui_text::{draw_text, measure_text};
+use crate::config::Difficulty;
 use crate::controls::{ControlsResult, ControlsScreen};
 use crate::input::{any_pressed, KeyBindings, SystemBindings};
 
@@ -11,8 +12,9 @@ pub enum MenuAction {
 }
 
 /// Пункты меню (в порядке отображения).
-const ITEMS: [&str; 3] = ["1 PLAYER", "2 PLAYERS", "CONTROLS"];
-const ITEM_CONTROLS: usize = 2;
+const ITEMS: [&str; 4] = ["1 PLAYER", "2 PLAYERS", "MODE", "CONTROLS"];
+const ITEM_MODE: usize = 2;
+const ITEM_CONTROLS: usize = 3;
 
 /// Титульный экран: выбор числа игроков, как в оригинале,
 /// и переход к настройке клавиш.
@@ -22,11 +24,13 @@ pub struct Menu {
     controls: Option<ControlsScreen>,
     keys_path: PathBuf,
     hiscore: u32,
+    /// Выбранная сложность (переключается пунктом MODE).
+    pub difficulty: Difficulty,
 }
 
 impl Menu {
-    pub fn new(selected: usize, keys_path: &Path, hiscore: u32) -> Self {
-        Self { selected, controls: None, keys_path: keys_path.to_path_buf(), hiscore }
+    pub fn new(selected: usize, keys_path: &Path, hiscore: u32, difficulty: Difficulty) -> Self {
+        Self { selected, controls: None, keys_path: keys_path.to_path_buf(), hiscore, difficulty }
     }
 
     /// Вверх/вниз — клавиши любого игрока или стрелки; выбор — Start
@@ -54,7 +58,17 @@ impl Menu {
         if down {
             self.selected = (self.selected + 1) % ITEMS.len();
         }
+        // На пункте MODE стрелки влево/вправо тоже переключают сложность.
+        if self.selected == ITEM_MODE
+            && (is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::Right))
+        {
+            self.difficulty = self.difficulty.toggled();
+        }
         if any_pressed(&sys.start) || players.iter().any(|k| k.fire_pressed()) {
+            if self.selected == ITEM_MODE {
+                self.difficulty = self.difficulty.toggled();
+                return None;
+            }
             if self.selected == ITEM_CONTROLS {
                 self.controls = Some(ControlsScreen::new(&self.keys_path));
                 return None;
@@ -86,10 +100,16 @@ impl Menu {
         let step = 56.0;
         for (i, item) in ITEMS.iter().enumerate() {
             let y = first_y + i as f32 * step;
-            center_text(item, y, item_size, WHITE);
+            if i == ITEM_MODE {
+                let color = if self.difficulty == Difficulty::Easy { GREEN } else { ORANGE };
+                center_text(&format!("MODE: {}", self.difficulty.label()), y, item_size, color);
+            } else {
+                center_text(item, y, item_size, WHITE);
+            }
             if i == self.selected {
                 // Курсор — маленький танк слева от пункта.
-                let dims = measure_text(ITEMS[1], None, item_size as u16, 1.0);
+                // По самой широкой надписи — чтобы курсор не наезжал на текст.
+                let dims = measure_text("MODE: NORMAL", None, item_size as u16, 1.0);
                 let s = 28.0;
                 let x = w / 2.0 - dims.width / 2.0 - s - 24.0;
                 let ty = y - s + 4.0;

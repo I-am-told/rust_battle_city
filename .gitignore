@@ -6,3 +6,5 @@ keys.ron
 keys.ron.tmp
 # Рекорд (локальный для каждого компьютера)
 hiscore.txt
+# Выбранная сложность (локальная)
+difficulty.txt

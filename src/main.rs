@@ -14,7 +14,10 @@ use crate::ui_text::{draw_text, measure_text};
 use config::load_config;
 use game::state::{Game, GameState};
 use input::{any_down, any_pressed, warn_conflicts, KeyBindings, SystemBindings};
-use config::{config_dir, hiscore_path, keys_file_path, load_hiscore, load_keys_file, save_hiscore, PlayerKeys};
+use config::{
+    config_dir, difficulty_path, hiscore_path, keys_file_path, load_difficulty, load_hiscore,
+    load_keys_file, save_difficulty, save_hiscore, PlayerKeys,
+};
 use menu::{Menu, MenuAction};
 use std::rc::Rc;
 
@@ -69,8 +72,11 @@ async fn main() {
     // Рекорд хранится в hiscore.txt рядом с config.ron.
     let hiscore_file = hiscore_path(&config_dir());
     let mut hiscore = load_hiscore(&hiscore_file);
+    // Сложность (по умолчанию лёгкая) — в difficulty.txt.
+    let difficulty_file = difficulty_path(&config_dir());
+    let mut difficulty = load_difficulty(&difficulty_file);
 
-    let mut screen = Screen::Menu(Menu::new(0, &keys_path, hiscore));
+    let mut screen = Screen::Menu(Menu::new(0, &keys_path, hiscore, difficulty));
     // Последний выбор в меню (после GAME OVER курсор стоит на нём).
     let mut last_menu_choice: usize = 0;
     // Сколько секунд удерживается клавиша выхода.
@@ -103,7 +109,13 @@ async fn main() {
         let mut next: Option<Screen> = None;
         match &mut screen {
             Screen::Menu(menu) => {
-                if let Some(MenuAction::Start(n)) = menu.update(&mut all_keys, &base_keys, &sys) {
+                let action = menu.update(&mut all_keys, &base_keys, &sys);
+                // Сложность переключили в меню — запомнить.
+                if menu.difficulty != difficulty {
+                    difficulty = menu.difficulty;
+                    save_difficulty(&difficulty_file, difficulty);
+                }
+                if let Some(MenuAction::Start(n)) = action {
                     last_menu_choice = menu.selected;
                     let keys = all_keys[..n.min(all_keys.len())].to_vec();
                     // Карты перечитываются при каждом старте: нарисовал —
@@ -113,7 +125,7 @@ async fn main() {
                         cfg.grid_width,
                         cfg.grid_height,
                     );
-                    next = Some(Screen::Game(Box::new(Game::new(&cfg, keys, Rc::new(lv), hiscore))));
+                    next = Some(Screen::Game(Box::new(Game::new(&cfg, keys, Rc::new(lv), hiscore, difficulty))));
                 }
                 audio.set_engine(false);
                 menu.draw(&all_keys);
@@ -128,7 +140,7 @@ async fn main() {
                     match game.state {
                         GameState::Victory => game.advance_level(&cfg),
                         GameState::Defeat => {
-                            next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path, hiscore)));
+                            next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path, hiscore, difficulty)));
                         }
                         GameState::Playing => game.toggle_pause(),
                     }

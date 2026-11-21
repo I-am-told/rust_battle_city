@@ -313,35 +313,46 @@ impl GameMap {
 
     /// Временная стальная стена вокруг базы (эффект "лопата").
     /// Возвращает список тайлов, где была поставлена сталь.
+    /// Тайлы стены вокруг штаба (сверху и по бокам), в пределах поля.
+    pub fn base_wall_tiles(&self) -> Vec<IVec2> {
+        let Some(b) = self.base_origin else { return Vec::new() };
+        let mut v: Vec<IVec2> = ((b.x - 1)..=(b.x + 2)).map(|x| ivec2(x, b.y - 1)).collect();
+        for y in b.y..(b.y + 2) {
+            v.push(ivec2(b.x - 1, y));
+            v.push(ivec2(b.x + 2, y));
+        }
+        v.retain(|t| self.in_bounds(t.x, t.y));
+        v
+    }
+
+    /// Целость стены штаба 0.0..1.0: доля уцелевших четвертинок кирпича.
+    /// Сталь (лопата) считается целой стеной.
+    pub fn base_wall_integrity(&self) -> f32 {
+        let tiles = self.base_wall_tiles();
+        if tiles.is_empty() {
+            return 1.0;
+        }
+        let intact: u32 = tiles
+            .iter()
+            .map(|t| {
+                let idx = (t.x + t.y * self.width) as usize;
+                match self.tiles[idx] {
+                    Tile::Brick => self.brick_mask[idx].count_ones(),
+                    Tile::Steel => 4,
+                    _ => 0,
+                }
+            })
+            .sum();
+        intact as f32 / (tiles.len() as f32 * 4.0)
+    }
+
+    /// Лопата: стена вокруг штаба становится стальной.
     pub fn apply_shovel(&mut self) -> Vec<IVec2> {
-        let mut tiles_changed: Vec<IVec2> = Vec::new();
-        let base = match self.base_origin {
-            Some(b) => b,
-            None => return tiles_changed,
-        };
-        let base_x = base.x;
-        let base_y = base.y;
-
-        let set_tile = |map: &mut GameMap, x: i32, y: i32, out: &mut Vec<IVec2>| {
-            if x < 0 || x >= map.width || y < 0 || y >= map.height {
-                return;
-            }
-            map.set_tile(x, y, Tile::Steel);
-            out.push(ivec2(x, y));
-        };
-
-        let top_y = base_y - 1;
-        for x in (base_x - 1)..=(base_x + 2) {
-            set_tile(self, x, top_y, &mut tiles_changed);
+        let tiles = self.base_wall_tiles();
+        for t in &tiles {
+            self.set_tile(t.x, t.y, Tile::Steel);
         }
-        for y in base_y..(base_y + 2) {
-            set_tile(self, base_x - 1, y, &mut tiles_changed);
-        }
-        for y in base_y..(base_y + 2) {
-            set_tile(self, base_x + 2, y, &mut tiles_changed);
-        }
-
-        tiles_changed
+        tiles
     }
 
     /// Возвращает кирпичи на места, где была сталь после лопаты.
@@ -358,10 +369,26 @@ impl GameMap {
         }
     }
 
+    /// Место для бонуса рядом с `near` (тайл): одно из ближайших свободных
+    /// мест 2x2, но не вплотную на `near` (чтобы к бонусу надо было
+    /// подъехать). None — подходящих мест нет.
+    pub fn bonus_spawn_near(&self, near: IVec2, forbidden: &[IVec2]) -> Option<IVec2> {
+        let mut c = self.bonus_candidates(forbidden);
+        c.retain(|p| (p.x - near.x).abs() >= 2 || (p.y - near.y).abs() >= 2);
+        let dist = |p: &IVec2| (p.x - near.x).abs() + (p.y - near.y).abs();
+        c.sort_by_key(dist);
+        let pool = c.len().min(4);
+        if pool == 0 {
+            return None;
+        }
+        Some(c[rand::gen_range(0, pool)])
+    }
+
     /// Случайное место для бонуса размером 2x2 тайла (как танк).
     /// Все 4 тайла должны быть пустыми, а область не должна пересекаться
     /// с областями 2x2 из `forbidden` (точки появления, другие бонусы).
-    pub fn random_bonus_spawn(&self, forbidden: &[IVec2]) -> Option<IVec2> {
+    /// Все свободные места 2x2 для бонуса.
+    fn bonus_candidates(&self, forbidden: &[IVec2]) -> Vec<IVec2> {
         let mut candidates: Vec<IVec2> = Vec::new();
         for y in 0..(self.height - 1) {
             for x in 0..(self.width - 1) {
@@ -383,6 +410,11 @@ impl GameMap {
                 candidates.push(p);
             }
         }
+        candidates
+    }
+
+    pub fn random_bonus_spawn(&self, forbidden: &[IVec2]) -> Option<IVec2> {
+        let candidates = self.bonus_candidates(forbidden);
         if candidates.is_empty() {
             return None;
         }

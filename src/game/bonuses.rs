@@ -8,6 +8,13 @@ impl Game {
         let tuning = self.tuning;
         match kind {
             BonusKind::Star => {
+                // Лёгкий режим: звезда отца (P1) — и сыну (P2) тоже.
+                let share = self.son_rules() && pi == 0;
+                if share {
+                    let son = &mut self.players[1].tank;
+                    let r = (son.rank + 1).min(MAX_RANK);
+                    son.apply_rank(r);
+                }
                 let tank = &mut self.players[pi].tank;
                 let new_rank = (tank.rank + 1).min(MAX_RANK);
                 tank.apply_rank(new_rank);
@@ -23,8 +30,11 @@ impl Game {
             BonusKind::Grenade => {
                 // Как в оригинале: граната уничтожает всех врагов на поле,
                 // включая бронированных (независимо от HP).
+                // Лёгкий режим: бонусный (мигающий) враг не взрывается —
+                // пусть сын подобьёт его и получит бонус.
+                let spare_bonus = self.son_rules();
                 let mut killed = 0;
-                for e in self.enemies.iter_mut().filter(|e| e.alive) {
+                for e in self.enemies.iter_mut().filter(|e| e.alive && !(spare_bonus && e.is_bonus)) {
                     e.hp = 0;
                     e.alive = false;
                     killed += 1;
