@@ -100,19 +100,21 @@ pub struct Game {
 }
 
 impl Game {
-    /// Новая игра с 1-го уровня. Число игроков = длина `keys` (1 или 2).
+    /// Новая игра с уровня `level` (пункт STAGE в меню); жизни, ранги
+    /// и очки — как при старте с 1-го. Число игроков = длина `keys` (1 или 2).
     /// Клавиши разбираются один раз в main, чтобы предупреждения
     /// о кривых клавишах не повторялись каждый уровень.
-    pub fn new(
+    pub fn new_at(
         cfg: &Config,
         keys: Vec<KeyBindings>,
         levels: Rc<LevelSet>,
         hiscore: u32,
         difficulty: Difficulty,
+        level: u32,
     ) -> Self {
         let n = keys.len();
         let progress = Progress {
-            level: 1,
+            level: level.max(1),
             // Запас общий: при двух игроках на старте вдвое больше.
             lives: cfg.gameplay.start_lives_per_player * n as u32,
             ranks: vec![0; n],

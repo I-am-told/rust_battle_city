@@ -8,3 +8,5 @@ keys.ron.tmp
 hiscore.txt
 # Выбранная сложность (локальная)
 difficulty.txt
+# Уровень, на котором остановились (локальный)
+stage.txt

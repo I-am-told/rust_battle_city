@@ -12,9 +12,10 @@ pub enum MenuAction {
 }
 
 /// Пункты меню (в порядке отображения).
-const ITEMS: [&str; 4] = ["1 PLAYER", "2 PLAYERS", "MODE", "CONTROLS"];
+const ITEMS: [&str; 5] = ["1 PLAYER", "2 PLAYERS", "MODE", "STAGE", "CONTROLS"];
 const ITEM_MODE: usize = 2;
-const ITEM_CONTROLS: usize = 3;
+const ITEM_STAGE: usize = 3;
+const ITEM_CONTROLS: usize = 4;
 
 /// Титульный экран: выбор числа игроков, как в оригинале,
 /// и переход к настройке клавиш.
@@ -26,11 +27,34 @@ pub struct Menu {
     hiscore: u32,
     /// Выбранная сложность (переключается пунктом MODE).
     pub difficulty: Difficulty,
+    /// С какого уровня начинать (пункт STAGE). По умолчанию — где остановились.
+    pub stage: u32,
+    /// Сколько карт в папке levels (0 — встроенная тестовая).
+    maps: u32,
 }
 
 impl Menu {
-    pub fn new(selected: usize, keys_path: &Path, hiscore: u32, difficulty: Difficulty) -> Self {
-        Self { selected, controls: None, keys_path: keys_path.to_path_buf(), hiscore, difficulty }
+    pub fn new(selected: usize, keys_path: &Path, hiscore: u32, difficulty: Difficulty, stage: u32, maps: u32) -> Self {
+        let mut m = Self { selected, controls: None, keys_path: keys_path.to_path_buf(), hiscore, difficulty, stage, maps };
+        m.stage = stage.clamp(1, m.max_stage());
+        m
+    }
+
+    /// Выбрать можно все карты по два круга (второй — с умными врагами).
+    fn max_stage(&self) -> u32 {
+        let maps = if self.maps == 0 { 15 } else { self.maps };
+        maps * 2
+    }
+
+    /// Уровень — уже второй круг карт (враги умнее).
+    fn stage_is_smart(&self) -> bool {
+        let maps = if self.maps == 0 { 15 } else { self.maps };
+        self.stage > maps
+    }
+
+    fn change_stage(&mut self, delta: i32) {
+        let max = self.max_stage() as i32;
+        self.stage = ((self.stage as i32 - 1 + delta).rem_euclid(max) + 1) as u32;
     }
 
     /// Вверх/вниз — клавиши любого игрока или стрелки; выбор — Start
@@ -58,15 +82,24 @@ impl Menu {
         if down {
             self.selected = (self.selected + 1) % ITEMS.len();
         }
-        // На пункте MODE стрелки влево/вправо тоже переключают сложность.
-        if self.selected == ITEM_MODE
-            && (is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::Right))
-        {
+        let left = players.iter().any(|k| k.left_pressed()) || is_key_pressed(KeyCode::Left);
+        let right = players.iter().any(|k| k.right_pressed()) || is_key_pressed(KeyCode::Right);
+        // На пункте MODE влево/вправо тоже переключают сложность.
+        if self.selected == ITEM_MODE && (left || right) {
             self.difficulty = self.difficulty.toggled();
+        }
+        // STAGE: влево/вправо — уровень (по кругу).
+        if self.selected == ITEM_STAGE {
+            if left { self.change_stage(-1); }
+            if right { self.change_stage(1); }
         }
         if any_pressed(&sys.start) || players.iter().any(|k| k.fire_pressed()) {
             if self.selected == ITEM_MODE {
                 self.difficulty = self.difficulty.toggled();
+                return None;
+            }
+            if self.selected == ITEM_STAGE {
+                self.change_stage(1);
                 return None;
             }
             if self.selected == ITEM_CONTROLS {
@@ -103,13 +136,19 @@ impl Menu {
             if i == ITEM_MODE {
                 let color = if self.difficulty == Difficulty::Easy { GREEN } else { ORANGE };
                 center_text(&format!("MODE: {}", self.difficulty.label()), y, item_size, color);
+            } else if i == ITEM_STAGE {
+                let color = if self.stage_is_smart() { ORANGE } else { WHITE };
+                center_text(&format!("STAGE < {} >", self.stage), y, item_size, color);
+                if self.stage_is_smart() {
+                    center_text("SMART ENEMIES", y + 20.0, 16.0, ORANGE);
+                }
             } else {
                 center_text(item, y, item_size, WHITE);
             }
             if i == self.selected {
                 // Курсор — маленький танк слева от пункта.
                 // По самой широкой надписи — чтобы курсор не наезжал на текст.
-                let dims = measure_text("MODE: NORMAL", None, item_size as u16, 1.0);
+                let dims = measure_text("STAGE < 30 >", None, item_size as u16, 1.0);
                 let s = 28.0;
                 let x = w / 2.0 - dims.width / 2.0 - s - 24.0;
                 let ty = y - s + 4.0;

@@ -486,6 +486,27 @@ pub fn difficulty_path(dir: &Path) -> PathBuf {
     p.strip_prefix(".").map(|x| x.to_path_buf()).unwrap_or(p)
 }
 
+/// Файл с уровнем, на котором остановились (stage.txt рядом с config.ron).
+pub fn stage_path(dir: &Path) -> PathBuf {
+    let p = dir.join("stage.txt");
+    p.strip_prefix(".").map(|x| x.to_path_buf()).unwrap_or(p)
+}
+
+/// Уровень из stage.txt; нет файла или мусор — 1.
+pub fn load_stage(path: &Path) -> u32 {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|t| t.trim().parse::<u32>().ok())
+        .filter(|&n| n >= 1)
+        .unwrap_or(1)
+}
+
+pub fn save_stage(path: &Path, level: u32) {
+    if let Err(e) = fs::write(path, format!("{level}\n")) {
+        eprintln!("Не удалось сохранить уровень в {}: {e}", path.display());
+    }
+}
+
 /// Сложность из файла; нет файла или непонятное значение — лёгкая.
 pub fn load_difficulty(path: &Path) -> Difficulty {
     match fs::read_to_string(path).map(|t| t.trim().to_lowercase()) {

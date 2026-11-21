@@ -97,6 +97,14 @@ impl KeyBindings {
         any_pressed(&self.down)
     }
 
+    pub fn left_pressed(&self) -> bool {
+        any_pressed(&self.left)
+    }
+
+    pub fn right_pressed(&self) -> bool {
+        any_pressed(&self.right)
+    }
+
     /// Все пары (действие, клавиша) — для поиска конфликтов.
     fn all(&self, who: &str) -> Vec<(String, KeyCode)> {
         let mut v = Vec::new();

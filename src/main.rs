@@ -16,7 +16,7 @@ use game::state::{Game, GameState};
 use input::{any_down, any_pressed, warn_conflicts, KeyBindings, SystemBindings};
 use config::{
     config_dir, difficulty_path, hiscore_path, keys_file_path, load_difficulty, load_hiscore,
-    load_keys_file, save_difficulty, save_hiscore, PlayerKeys,
+    load_keys_file, load_stage, save_difficulty, save_hiscore, save_stage, stage_path, PlayerKeys,
 };
 use menu::{Menu, MenuAction};
 use std::rc::Rc;
@@ -76,7 +76,15 @@ async fn main() {
     let difficulty_file = difficulty_path(&config_dir());
     let mut difficulty = load_difficulty(&difficulty_file);
 
-    let mut screen = Screen::Menu(Menu::new(0, &keys_path, hiscore, difficulty));
+    // Уровень, на котором остановились, — в stage.txt (меню предлагает его).
+    let stage_file = stage_path(&config_dir());
+    let mut stage = load_stage(&stage_file);
+    // Сколько карт — чтобы меню знало, где начинается второй круг.
+    let map_count = || {
+        levels::load_levels(&config_dir().join("levels"), cfg.grid_width, cfg.grid_height).maps.len() as u32
+    };
+
+    let mut screen = Screen::Menu(Menu::new(0, &keys_path, hiscore, difficulty, stage, map_count()));
     // Последний выбор в меню (после GAME OVER курсор стоит на нём).
     let mut last_menu_choice: usize = 0;
     // Сколько секунд удерживается клавиша выхода.
@@ -117,6 +125,8 @@ async fn main() {
                 }
                 if let Some(MenuAction::Start(n)) = action {
                     last_menu_choice = menu.selected;
+                    stage = menu.stage;
+                    save_stage(&stage_file, stage);
                     let keys = all_keys[..n.min(all_keys.len())].to_vec();
                     // Карты перечитываются при каждом старте: нарисовал —
                     // вышел в меню — играешь, без перезапуска программы.
@@ -125,7 +135,7 @@ async fn main() {
                         cfg.grid_width,
                         cfg.grid_height,
                     );
-                    next = Some(Screen::Game(Box::new(Game::new(&cfg, keys, Rc::new(lv), hiscore, difficulty))));
+                    next = Some(Screen::Game(Box::new(Game::new_at(&cfg, keys, Rc::new(lv), hiscore, difficulty, stage))));
                 }
                 audio.set_engine(false);
                 menu.draw(&all_keys);
@@ -140,7 +150,7 @@ async fn main() {
                     match game.state {
                         GameState::Victory => game.advance_level(&cfg),
                         GameState::Defeat => {
-                            next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path, hiscore, difficulty)));
+                            next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path, hiscore, difficulty, stage, map_count())));
                         }
                         // Пауза после последнего врага — Enter её пропускает
                         // (сразу экран победы); иначе Enter — пауза.
@@ -150,6 +160,12 @@ async fn main() {
                             }
                         }
                     }
+                }
+                // Начался новый уровень — запомнить: после GAME OVER или выхода
+                // меню предложит продолжить с него.
+                if game.current_level != stage {
+                    stage = game.current_level;
+                    save_stage(&stage_file, stage);
                 }
                 game.update(dt);
                 // Звуки за кадр: одинаковые не дублируем (три взрыва
