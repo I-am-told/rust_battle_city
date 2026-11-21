@@ -369,19 +369,22 @@ impl GameMap {
         }
     }
 
-    /// Место для бонуса рядом с `near` (тайл): одно из ближайших свободных
-    /// мест 2x2, но не вплотную на `near` (чтобы к бонусу надо было
-    /// подъехать). None — подходящих мест нет.
+    /// Место для бонуса рядом с `near` (тайл, где стоит танк): случайное
+    /// свободное место 2x2, между которым и танком от 1 до 5 тайлов —
+    /// не вплотную и не на танке, но и недалеко. Если таких нет —
+    /// ищем дальше (до 10). None — подходящих мест нет вовсе.
     pub fn bonus_spawn_near(&self, near: IVec2, forbidden: &[IVec2]) -> Option<IVec2> {
-        let mut c = self.bonus_candidates(forbidden);
-        c.retain(|p| (p.x - near.x).abs() >= 2 || (p.y - near.y).abs() >= 2);
-        let dist = |p: &IVec2| (p.x - near.x).abs() + (p.y - near.y).abs();
-        c.sort_by_key(dist);
-        let pool = c.len().min(4);
-        if pool == 0 {
-            return None;
+        let all = self.bonus_candidates(forbidden);
+        // Зазор между бонусом и танком (оба 2x2) = расстояние между
+        // углами минус 2.
+        let gap = |p: &IVec2| (p.x - near.x).abs().max((p.y - near.y).abs()) - 2;
+        for max_gap in [5, 10] {
+            let c: Vec<IVec2> = all.iter().copied().filter(|p| (1..=max_gap).contains(&gap(p))).collect();
+            if !c.is_empty() {
+                return Some(c[rand::gen_range(0, c.len())]);
+            }
         }
-        Some(c[rand::gen_range(0, pool)])
+        None
     }
 
     /// Случайное место для бонуса размером 2x2 тайла (как танк).

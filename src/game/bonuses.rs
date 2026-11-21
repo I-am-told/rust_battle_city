@@ -8,12 +8,14 @@ impl Game {
         let tuning = self.tuning;
         match kind {
             BonusKind::Star => {
-                // Лёгкий режим: звезда отца (P1) — и сыну (P2) тоже.
-                let share = self.son_rules() && pi == 0;
-                if share {
-                    let son = &mut self.players[1].tank;
-                    let r = (son.rank + 1).min(MAX_RANK);
-                    son.apply_rank(r);
+                // Лёгкий режим: звезда — обоим игрокам, кто бы её ни взял.
+                if self.son_rules() {
+                    for (i, p) in self.players.iter_mut().enumerate() {
+                        if i != pi {
+                            let r = (p.tank.rank + 1).min(MAX_RANK);
+                            p.tank.apply_rank(r);
+                        }
+                    }
                 }
                 let tank = &mut self.players[pi].tank;
                 let new_rank = (tank.rank + 1).min(MAX_RANK);
@@ -47,6 +49,12 @@ impl Game {
                 println!("Timer picked! Enemies frozen for {}s", tuning.freeze_time);
             }
             BonusKind::Helmet => {
+                // Лёгкий режим: щит — обоим (живым) игрокам, кто бы его ни взял.
+                if self.son_rules() {
+                    for p in self.players.iter_mut().filter(|p| p.tank.alive) {
+                        p.give_shield(tuning.helmet_shield);
+                    }
+                }
                 self.players[pi].give_shield(tuning.helmet_shield);
                 println!("Helmet picked! Shield for {}s", tuning.helmet_shield);
             }

@@ -21,7 +21,7 @@ use crate::levels::LevelSet;
 use std::rc::Rc;
 
 /// Максимальный ранг игрока (см. Tank::apply_rank).
-pub const MAX_RANK: u8 = 6;
+pub const MAX_RANK: u8 = 7;
 
 /// Что переносится между уровнями.
 pub struct Progress {
@@ -543,6 +543,17 @@ impl Game {
         if pending_bonuses > 0 {
             let mut forbidden: Vec<IVec2> = self.spawner.spawn_points().to_vec();
             forbidden.extend(self.players.iter().map(|p| p.spawn_tile));
+            // И не под живыми игроками — иначе бонус подберётся сам.
+            let ts = self.tile_size;
+            // (танк может стоять между тайлами — берём оба соседних).
+            for p in self.players.iter().filter(|p| p.tank.alive) {
+                let (fx, fy) = (p.tank.pos.x / ts, p.tank.pos.y / ts);
+                for x in [fx.floor() as i32, fx.ceil() as i32] {
+                    for y in [fy.floor() as i32, fy.ceil() as i32] {
+                        forbidden.push(ivec2(x, y));
+                    }
+                }
+            }
 
             for _ in 0..pending_bonuses {
                 // Лёгкий режим: бонус появляется рядом с сыном (P2).
@@ -805,8 +816,14 @@ impl Game {
         }
         let size = self.tank_size;
         let field = vec2(self.map.width as f32, self.map.height as f32) * self.tile_size;
+        let son_rules = self.son_rules();
         for gi in 0..self.players.len() {
             let qi = (gi + 1) % self.players.len();
+            // Лёгкий режим: защищаем только сына — к нему телепортируется
+            // отец (P1), сын к отцу — нет.
+            if son_rules && !(gi == 0 && qi == 1) {
+                continue;
+            }
             let (g, q) = (&self.players[gi], &self.players[qi]);
             if !g.tank.alive || g.tank.rank < 6 || g.guard_cooldown > 0.0 {
                 continue;

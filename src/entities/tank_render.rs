@@ -66,6 +66,8 @@ struct Look {
     muzzle: bool,
     /// Гоночные полосы на корпусе и выхлопные трубы (ранг 4 — быстрый).
     racer: bool,
+    /// Три ствола (ранг 7 — три пули).
+    triple: bool,
 }
 
 fn look_for(tank: &Tank) -> Look {
@@ -78,6 +80,7 @@ fn look_for(tank: &Tank) -> Look {
         wedge: false,
         muzzle: false,
         racer: false,
+        triple: false,
     };
     match tank.kind {
         Some(EnemyKind::Fast) => Look { hull_inset: 0.25, turret_r: 0.15, barrel_w: 0.09, wedge: true, ..base },
@@ -88,7 +91,9 @@ fn look_for(tank: &Tank) -> Look {
         // 1 — длинный ствол с дульным тормозом (быстрые пули);
         // 2 — бронеплиты и башня крупнее (две пули);
         // 3 — тяжёлый: шире корпус, толстый ствол (пробивает сталь);
-        // 4 — тяжёлый + гоночные полосы и выхлоп (быстрее ездит).
+        // 4 — тяжёлый + гоночные полосы и выхлоп (быстрее ездит);
+        // 5–6 — + бронелисты и золотая рамка (рисуются отдельно);
+        // 7 — + три ствола (три пули).
         None => match tank.rank {
             0 => base,
             1 => Look { barrel_w: 0.13, barrel_tip: 0.0, muzzle: true, ..base },
@@ -97,9 +102,9 @@ fn look_for(tank: &Tank) -> Look {
                 hull_inset: 0.16, turret_r: 0.23, barrel_w: 0.16, barrel_tip: 0.0,
                 muzzle: true, plates: true, ..base
             },
-            _ => Look {
+            r => Look {
                 hull_inset: 0.16, turret_r: 0.23, barrel_w: 0.16, barrel_tip: 0.0,
-                muzzle: true, plates: true, racer: true, ..base
+                muzzle: true, plates: true, racer: true, triple: r >= 7, ..base
             },
         },
         _ => base,
@@ -135,6 +140,10 @@ impl Tank {
         // Ранг 6: золотая рамка.
         if self.team == Team::Player && self.rank >= 6 {
             self.draw_gold_frame();
+        }
+        // Ранг 7: боковые стволы — поверх бронелистов, чтобы их было видно.
+        if look_for(self).triple {
+            self.draw_side_barrels(color);
         }
 
         // Маркеры ранга у игрока.
@@ -241,6 +250,18 @@ impl Tank {
         pen.circle(0.5, 0.56, look.turret_r, dark);
         pen.circle(0.5, 0.56, look.turret_r * 0.82, color);
         pen.circle(0.46, 0.52, look.turret_r * 0.35, light);
+    }
+
+    /// Два боковых ствола 7-го ранга (три пули) — по бокам от главного.
+    fn draw_side_barrels(&self, color: Color) {
+        let pen = Pen { pos: self.pos, size: self.size, dir: self.direction };
+        let (dark, light) = (shade(color, 0.35), tint(color, 0.5));
+        for cx in [0.31, 0.69] {
+            let (w, x) = (0.1, cx - 0.05);
+            pen.rect(x, 0.0, w, 0.44, dark);
+            pen.rect(x + 0.03, 0.02, 0.035, 0.4, light);
+            pen.rect(x - 0.02, 0.0, w + 0.04, 0.07, dark);
+        }
     }
 
     /// Бронелисты: стальные экраны поверх гусениц и лобовая плита с заклёпками.
