@@ -15,12 +15,12 @@ use crate::game::level::LevelConfig;
 use crate::game::hud::{self, draw_tank_icon};
 use crate::entities::enemy_kind::EnemyKind;
 use crate::entities::tank_render::enemy_color;
-use crate::game::player::{Player, PLAYER_ID_BASE};
+use crate::game::player::{HitResult, Player, PLAYER_ID_BASE};
 use crate::levels::LevelSet;
 use std::rc::Rc;
 
 /// Максимальный ранг игрока (см. Tank::apply_rank).
-pub const MAX_RANK: u8 = 4;
+pub const MAX_RANK: u8 = 6;
 
 /// Что переносится между уровнями.
 pub struct Progress {
@@ -300,6 +300,7 @@ impl Game {
         // Защитные поля и возрождение.
         for i in 0..self.players.len() {
             self.players[i].tick_shield(dt);
+            self.players[i].guard_cooldown = (self.players[i].guard_cooldown - dt).max(0.0);
             self.players[i].tick_star(dt);
 
             let Some(t) = self.players[i].respawn_timer else { continue };
@@ -423,6 +424,9 @@ impl Game {
             self.pending.push((new_enemy, 0.0));
         }
 
+        // Ранг 6: телепорт-защитник — до того, как пули полетят.
+        self.guardian_step();
+
         // Пули. Игроки в одной команде — пули проходят сквозь напарника.
         let tanks_now = self.all_tanks();
         // (в кого попали, чья пуля)
@@ -469,10 +473,15 @@ impl Game {
             if let Some(p) = self.players.iter_mut().find(|p| p.tank.id == id) {
                 // Player::hit сам проверяет alive/invulnerable: вторая пуля
                 // в том же кадре ничего не делает.
-                if p.hit() {
-                    let c = p.tank.pos + vec2(p.tank.size, p.tank.size) / 2.0;
-                    self.effects.push(Effect::new(c, EffectKind::Big, self.tank_size));
-                    self.sfx.push(Sfx::PlayerBoom);
+                match p.hit() {
+                    HitResult::Died => {
+                        let c = p.tank.pos + vec2(p.tank.size, p.tank.size) / 2.0;
+                        self.effects.push(Effect::new(c, EffectKind::Big, self.tank_size));
+                        self.sfx.push(Sfx::PlayerBoom);
+                    }
+                    // Броня приняла удар — танк цел, но броню видно, что сорвало.
+                    HitResult::ArmorLost => self.sfx.push(Sfx::HitArmor),
+                    HitResult::Nothing => {}
                 }
             } else if let Some(e) = self.enemies.iter_mut().find(|e| e.id == id) {
                 // Как в оригинале: бонус выпадает при ПЕРВОМ попадании
@@ -569,6 +578,78 @@ impl Game {
             if *t <= 0.0 {
                 self.state = GameState::Victory;
             }
+        }
+    }
+
+    /// Ранг 6 — телепорт-защитник. Если вражеская пуля вот-вот попадёт
+    /// в напарника, танк 6-го ранга мгновенно встаёт вплотную к напарнику
+    /// со стороны пули, стволом к врагу, и принимает удар на себя
+    /// (на броню, если она есть). Потом — перезарядка guardian_cooldown.
+    fn guardian_step(&mut self) {
+        if self.players.len() < 2 {
+            return;
+        }
+        let size = self.tank_size;
+        let field = vec2(self.map.width as f32, self.map.height as f32) * self.tile_size;
+        for gi in 0..self.players.len() {
+            let qi = (gi + 1) % self.players.len();
+            let (g, q) = (&self.players[gi], &self.players[qi]);
+            if !g.tank.alive || g.tank.rank < 6 || g.guard_cooldown > 0.0 {
+                continue;
+            }
+            if !q.tank.alive || q.tank.invulnerable {
+                continue;
+            }
+            // Вражеская пуля, которая на ближайших полутора танках пути
+            // попадёт в напарника.
+            let look = size * 1.5;
+            let (q0, q1) = (q.tank.pos, q.tank.pos + vec2(size, size));
+            let threat = self
+                .bullets
+                .iter()
+                .filter(|b| b.alive && b.owner_team == Team::Enemy)
+                .find_map(|b| {
+                    let v = b.direction.vector();
+                    let d = vec2(v.x as f32, v.y as f32);
+                    let (a, e) = (b.pos, b.pos + d * look);
+                    let (lo, hi) = (a.min(e), a.max(e) + vec2(b.size, b.size));
+                    let hits = lo.x < q1.x && hi.x > q0.x && lo.y < q1.y && hi.y > q0.y;
+                    hits.then_some(b.direction)
+                });
+            let Some(bullet_dir) = threat else { continue };
+            let v = bullet_dir.vector();
+            let spot = q.tank.pos - vec2(v.x as f32, v.y as f32) * size;
+
+            // Место должно быть свободно: поле, стены/вода, другие танки.
+            if spot.x < 0.0 || spot.y < 0.0 || spot.x + size > field.x || spot.y + size > field.y {
+                continue;
+            }
+            if self.map.rect_blocked(spot, vec2(size, size), self.tile_size, false) {
+                continue;
+            }
+            let g_id = g.tank.id;
+            let overlaps = |t: &Tank| {
+                t.alive && t.id != g_id
+                    && spot.x < t.pos.x + t.size - 0.01 && spot.x + size > t.pos.x + 0.01
+                    && spot.y < t.pos.y + t.size - 0.01 && spot.y + size > t.pos.y + 0.01
+            };
+            if self.enemies.iter().any(overlaps) || self.players.iter().any(|p| overlaps(&p.tank)) {
+                continue;
+            }
+
+            let half = vec2(size, size) / 2.0;
+            let from = self.players[gi].tank.pos + half;
+            let g = &mut self.players[gi];
+            g.tank.pos = spot;
+            g.tank.prev_pos = spot;
+            g.tank.slide_target = None;
+            g.tank.ice_glide = 0.0;
+            // Стволом к врагу — навстречу пуле.
+            g.tank.direction = bullet_dir.opposite();
+            g.guard_cooldown = self.tuning.guardian_cooldown;
+            self.effects.push(Effect::new(from, EffectKind::Teleport, size));
+            self.effects.push(Effect::new(spot + half, EffectKind::Teleport, size));
+            self.sfx.push(Sfx::Teleport);
         }
     }
 

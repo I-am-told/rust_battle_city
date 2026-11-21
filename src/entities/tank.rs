@@ -78,6 +78,9 @@ pub struct Tank {
     pub turn_slide_time: f32,
     /// Во сколько раз медленнее на песке (gameplay.sand_speed_mult).
     pub sand_speed_mult: f32,
+    /// Дополнительная броня игрока (ранг 5+): сколько попаданий выдержит
+    /// без гибели.
+    pub armor: u8,
 }
 
 impl Tank {
@@ -114,6 +117,7 @@ impl Tank {
             rank4_speed_mult: 1.3,
             turn_slide_time: 0.1,
             sand_speed_mult: 0.5,
+            armor: 0,
         }
     }
 
@@ -141,9 +145,13 @@ impl Tank {
 
     /// Ранг игрока (звёзды):
     /// 0 — одна пуля; 1 — быстрые пули; 2 — две пули;
-    /// 3 — пули пробивают сталь; 4 — всё это и танк быстрее на 30%.
+    /// 3 — пули пробивают сталь; 4 — всё это и танк быстрее на 30%;
+    /// 5 — + дополнительная броня (выдерживает одно попадание);
+    /// 6 — + телепорт-защитник (прикрывает напарника, золотая рамка).
+    /// Звезда на 5–6 ранге чинит броню.
     pub fn apply_rank(&mut self, rank: u8) {
         self.rank = rank;
+        self.armor = if rank >= 5 { 1 } else { 0 };
         self.speed = if rank >= 4 { self.base_speed * self.rank4_speed_mult } else { self.base_speed };
         match rank {
             0 => {

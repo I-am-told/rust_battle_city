@@ -8,6 +8,17 @@ use crate::input::{DirectionInput, KeyBindings};
 pub const PLAYER_ID_BASE: u32 = 1_000_000;
 
 
+/// Что случилось после попадания в игрока.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HitResult {
+    /// Ничего (щит, уже мёртв).
+    Nothing,
+    /// Попадание приняла броня (ранг 5+), танк цел.
+    ArmorLost,
+    /// Танк уничтожен.
+    Died,
+}
+
 /// Игрок: танк + его управление + состояние возрождения.
 pub struct Player {
     pub tank: Tank,
@@ -26,6 +37,8 @@ pub struct Player {
     /// Сколько врагов каждого типа уничтожено на этом уровне
     /// (индекс — EnemyKind::index), для экрана подсчёта.
     pub kills: [u32; 4],
+    /// Перезарядка телепорта-защитника (ранг 6), секунд.
+    pub guard_cooldown: f32,
     /// Настройки из config.ron (gameplay).
     tuning: Gameplay,
 }
@@ -44,6 +57,7 @@ impl Player {
             star: None,
             score: 0,
             kills: [0; 4],
+            guard_cooldown: 0.0,
             tuning: *tuning,
         }
     }
@@ -100,19 +114,26 @@ impl Player {
         self.respawn_timer = None;
     }
 
-    /// Попадание пули. Возвращает true, если танк погиб.
-    pub fn hit(&mut self) -> bool {
+    /// Попадание пули.
+    pub fn hit(&mut self) -> HitResult {
         if !self.tank.alive || self.tank.invulnerable {
-            return false;
+            return HitResult::Nothing;
+        }
+        if self.tank.armor > 0 {
+            // Броня (ранг 5+) принимает удар; короткий щит — чтобы не добили
+            // очередью сразу же.
+            self.tank.armor -= 1;
+            self.give_shield(self.tuning.armor_hit_shield);
+            return HitResult::ArmorLost;
         }
         self.tank.take_hit();
         if self.tank.alive {
-            return false;
+            return HitResult::Nothing;
         }
         // Как в оригинале: после гибели ранг (звёзды) сбрасывается.
         self.tank.apply_rank(0);
         self.respawn_timer = Some(self.tuning.respawn_delay);
-        true
+        HitResult::Died
     }
 
     /// Включить защитное поле на `secs` секунд (не сокращает уже идущее).

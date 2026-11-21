@@ -120,6 +120,10 @@ pub struct Gameplay {
     pub rank4_speed_mult: f32,
     /// Скорость любого танка на песке (0.5 — вдвое медленнее).
     pub sand_speed_mult: f32,
+    /// Короткий щит после того, как броня (ранг 5+) приняла попадание.
+    pub armor_hit_shield: f32,
+    /// Перезарядка телепорта-защитника (ранг 6).
+    pub guardian_cooldown: f32,
     /// Скорость врагов относительно tank_speed (у быстрых — ещё ×2).
     pub enemy_speed_mult: f32,
     /// Скорость вражеских пуль относительно bullet_speed.
@@ -146,6 +150,8 @@ impl Default for Gameplay {
             ice_slide_tiles: 1.0,
             rank4_speed_mult: 1.3,
             sand_speed_mult: 0.5,
+            armor_hit_shield: 1.0,
+            guardian_cooldown: 5.0,
             enemy_speed_mult: 0.75,
             enemy_bullet_speed_mult: 0.75,
             extra_life_every: 20_000,

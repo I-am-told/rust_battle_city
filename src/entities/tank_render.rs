@@ -128,6 +128,15 @@ impl Tank {
 
         self.draw_body(color);
 
+        // Ранг 5+: стальные бронелисты (пока броня цела).
+        if self.team == Team::Player && self.armor > 0 {
+            self.draw_armor();
+        }
+        // Ранг 6: золотая рамка.
+        if self.team == Team::Player && self.rank >= 6 {
+            self.draw_gold_frame();
+        }
+
         // Маркеры ранга у игрока.
         if self.team == Team::Player && self.rank > 0 {
             let n = self.rank as i32;
@@ -229,6 +238,49 @@ impl Tank {
         pen.circle(0.5, 0.56, look.turret_r, dark);
         pen.circle(0.5, 0.56, look.turret_r * 0.82, color);
         pen.circle(0.46, 0.52, look.turret_r * 0.35, light);
+    }
+
+    /// Бронелисты: стальные экраны поверх гусениц и лобовая плита с заклёпками.
+    fn draw_armor(&self) {
+        let pen = Pen { pos: self.pos, size: self.size, dir: self.direction };
+        let steel = Color::new(0.72, 0.74, 0.8, 1.0);
+        let edge = Color::new(0.42, 0.44, 0.5, 1.0);
+        let rivet = Color::new(0.95, 0.95, 1.0, 1.0);
+        for x in [-0.03, 0.85] {
+            pen.rect(x, 0.12, 0.18, 0.76, edge);
+            pen.rect(x + 0.02, 0.14, 0.14, 0.72, steel);
+            for y in [0.22, 0.5, 0.78] {
+                pen.circle(x + 0.09, y, 0.025, rivet);
+            }
+        }
+        // Лобовая плита (у основания ствола).
+        pen.rect(0.26, 0.12, 0.48, 0.08, edge);
+        pen.rect(0.28, 0.13, 0.44, 0.05, steel);
+    }
+
+    /// Золотая рамка 6-го ранга: переливается, с ромбиками по углам.
+    fn draw_gold_frame(&self) {
+        let t = get_time() as f32;
+        let shine = 0.75 + 0.25 * (t * 6.0).sin();
+        let gold = Color::new(1.0 * shine, 0.8 * shine, 0.15, 1.0);
+        let light = Color::new(1.0, 0.97, 0.6, 1.0);
+        let m = self.size * 0.06;
+        let (x, y, s) = (self.pos.x - m, self.pos.y - m, self.size + 2.0 * m);
+        draw_rectangle_lines(x, y, s, s, self.size * 0.07, gold);
+        for (cx, cy) in [(x, y), (x + s, y), (x, y + s), (x + s, y + s)] {
+            let r = self.size * 0.09;
+            draw_triangle(vec2(cx - r, cy), vec2(cx, cy - r), vec2(cx + r, cy), light);
+            draw_triangle(vec2(cx - r, cy), vec2(cx, cy + r), vec2(cx + r, cy), light);
+        }
+        // Бегущий блик по рамке.
+        let k = (t * 0.8).fract() * 4.0;
+        let (bx, by) = match k as i32 {
+            0 => (x + s * k.fract(), y),
+            1 => (x + s, y + s * k.fract()),
+            2 => (x + s * (1.0 - k.fract()), y + s),
+            _ => (x, y + s * (1.0 - k.fract())),
+        };
+        draw_circle(bx, by, self.size * 0.07, light);
     }
 
     /// Защитное поле после появления: мерцающее кольцо с искрами.

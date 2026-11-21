@@ -38,6 +38,8 @@ pub enum Sfx {
     LevelStart,
     /// Конец игры.
     GameOver,
+    /// Телепорт-защитник (ранг 6).
+    Teleport,
 }
 
 const RATE: u32 = 22_050;
@@ -192,6 +194,11 @@ fn samples(s: Sfx) -> Vec<f32> {
                 t(Triangle, C4, C4, 0.36, 0.35, 0.6),
             ]),
         ),
+        // Телепорт: быстрый «вжух» вверх и звон.
+        Sfx::Teleport => tones(&[
+            t(Triangle, 300.0, 1800.0, 0.12, 0.45, 0.2),
+            t(Square(0.25), 2093.0, 2093.0, 0.08, 0.15, 1.0),
+        ]),
         // Грустный спуск.
         Sfx::GameOver => mix(
             tones(&melody(&[(G5, 0.22), (E5, 0.22), (D5, 0.22), (C5, 0.6)], 0.5, 0.22)),
@@ -241,10 +248,10 @@ pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
     b
 }
 
-pub const ALL_SFX: [Sfx; 13] = [
+pub const ALL_SFX: [Sfx; 14] = [
     Sfx::Shot, Sfx::HitBrick, Sfx::HitSteel, Sfx::HitArmor, Sfx::EnemyBoom,
     Sfx::PlayerBoom, Sfx::BaseBoom, Sfx::BonusAppear, Sfx::BonusPickup,
-    Sfx::LifeUp, Sfx::Pause, Sfx::LevelStart, Sfx::GameOver,
+    Sfx::LifeUp, Sfx::Pause, Sfx::LevelStart, Sfx::GameOver, Sfx::Teleport,
 ];
 
 // ---------- воспроизведение ----------

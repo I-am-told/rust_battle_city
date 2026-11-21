@@ -12,6 +12,8 @@ pub enum EffectKind {
     Big,
     /// Всплывающие очки (100, 200, … 500) — ~0.8 с.
     Points(u32),
+    /// Вспышка телепорта (ранг 6): золотые кольца, ~0.35 с.
+    Teleport,
 }
 
 pub struct Effect {
@@ -33,6 +35,7 @@ impl Effect {
             EffectKind::Small => 0.2,
             EffectKind::Big => 0.5,
             EffectKind::Points(_) => 0.8,
+            EffectKind::Teleport => 0.35,
         };
         Self {
             center,
@@ -62,6 +65,18 @@ impl Effect {
         match self.kind {
             EffectKind::Small => self.draw_small(k),
             EffectKind::Big => self.draw_big(k),
+            EffectKind::Teleport => {
+                let gold = Color::new(1.0, 0.84, 0.2, 1.0 - k);
+                for i in 0..3 {
+                    let r = self.size * (0.25 + 0.5 * k + i as f32 * 0.12);
+                    draw_circle_lines(self.center.x, self.center.y, r, self.size * 0.06, gold);
+                }
+                for i in 0..8 {
+                    let a = i as f32 * std::f32::consts::TAU / 8.0 + k * 2.0;
+                    let p = self.center + vec2(a.cos(), a.sin()) * self.size * (0.3 + 0.6 * k);
+                    draw_circle(p.x, p.y, self.size * 0.05, Color::new(1.0, 1.0, 0.7, 1.0 - k));
+                }
+            }
             EffectKind::Points(p) => {
                 // Число немного всплывает вверх.
                 let text = p.to_string();
