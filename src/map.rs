@@ -11,6 +11,8 @@ pub enum Tile {
     Forest,
     /// Лёд: проезжаемый, танк игрока на нём скользит.
     Ice,
+    /// Песок: проезжаемый, танки на нём едут медленнее.
+    Sand,
 }
 
 /// Во что попала пуля (для звука).
@@ -156,7 +158,7 @@ impl GameMap {
         }
         let idx = (tx + ty * self.width) as usize;
         match self.tiles[idx] {
-            Tile::Empty | Tile::Forest | Tile::Ice => false,
+            Tile::Empty | Tile::Forest | Tile::Ice | Tile::Sand => false,
             Tile::Brick => {
                 let bit = qx.rem_euclid(2) + 2 * qy.rem_euclid(2);
                 self.brick_mask[idx] & (1 << bit) != 0
@@ -179,14 +181,19 @@ impl GameMap {
         )
     }
 
-    /// Стоит ли прямоугольник (пиксели) хоть частью на льду.
-    pub fn on_ice(&self, pos: Vec2, size: Vec2, tile_size: f32) -> bool {
+    /// Стоит ли прямоугольник (пиксели) хоть частью на тайле `tile`.
+    pub fn touches(&self, pos: Vec2, size: Vec2, tile_size: f32, tile: Tile) -> bool {
         let eps = 0.001;
         let x0 = (pos.x / tile_size).floor() as i32;
         let x1 = ((pos.x + size.x - eps) / tile_size).floor() as i32;
         let y0 = (pos.y / tile_size).floor() as i32;
         let y1 = ((pos.y + size.y - eps) / tile_size).floor() as i32;
-        (y0..=y1).any(|y| (x0..=x1).any(|x| self.get_tile(x, y) == Tile::Ice))
+        (y0..=y1).any(|y| (x0..=x1).any(|x| self.get_tile(x, y) == tile))
+    }
+
+    /// Стоит ли прямоугольник хоть частью на льду.
+    pub fn on_ice(&self, pos: Vec2, size: Vec2, tile_size: f32) -> bool {
+        self.touches(pos, size, tile_size, Tile::Ice)
     }
 
     /// Лес — рисовать ПОСЛЕ танков и пуль: под деревьями можно спрятаться.
@@ -360,7 +367,10 @@ impl GameMap {
             for x in 0..(self.width - 1) {
                 let all_empty = (0..2).all(|dy| {
                     (0..2).all(|dx| {
-                        matches!(self.get_tile(x + dx, y + dy), Tile::Empty | Tile::Forest | Tile::Ice)
+                        matches!(
+                            self.get_tile(x + dx, y + dy),
+                            Tile::Empty | Tile::Forest | Tile::Ice | Tile::Sand
+                        )
                     })
                 });
                 if !all_empty {
@@ -391,6 +401,7 @@ impl GameMap {
                     // Лес рисуется отдельно, поверх танков (draw_forest).
                     Tile::Empty | Tile::Forest => {}
                     Tile::Ice => draw_ice_tile(px, py, tile_size),
+                    Tile::Sand => draw_sand_tile(x, y, px, py, tile_size),
                     Tile::Brick => {
                         let mask = self.brick_mask[(x + y * self.width) as usize];
                         draw_brick_tile(px, py, tile_size, mask);
@@ -569,5 +580,22 @@ fn draw_forest_tile(x: i32, y: i32, px: f32, py: f32, ts: f32) {
         draw_circle(cx + jitter, cy + q * 0.08, q * 0.62, dark);
         draw_circle(cx + jitter, cy, q * 0.55, mid);
         draw_circle(cx + jitter - q * 0.15, cy - q * 0.15, q * 0.22, light);
+    }
+}
+
+/// Песок: тёплый жёлто-бежевый с рябью и песчинками (у соседних
+/// тайлов рисунок чуть сдвинут, чтобы не было клетки).
+fn draw_sand_tile(x: i32, y: i32, px: f32, py: f32, ts: f32) {
+    draw_rectangle(px, py, ts, ts, Color::new(0.85, 0.72, 0.45, 1.0));
+    let ripple = Color::new(0.74, 0.6, 0.35, 1.0);
+    let grain = Color::new(0.95, 0.86, 0.62, 1.0);
+    let line = (ts / 16.0).max(1.0);
+    let shift = ((x * 3 + y * 5) % 4) as f32 * ts * 0.08;
+    for k in [0.3, 0.72] {
+        draw_rectangle(px + ts * 0.1 + shift, py + ts * k, ts * 0.45, line, ripple);
+    }
+    for (u, v) in [(0.2, 0.15), (0.7, 0.45), (0.35, 0.55), (0.82, 0.85), (0.55, 0.9), (0.1, 0.8)] {
+        let gx = px + ((u * ts + shift * 2.0) % ts);
+        draw_rectangle(gx, py + v * ts, line * 1.2, line * 1.2, grain);
     }
 }

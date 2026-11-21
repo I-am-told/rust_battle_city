@@ -159,6 +159,7 @@ impl Game {
                 tank.ice_slide_tiles = cfg.gameplay.ice_slide_tiles;
                 tank.rank4_speed_mult = cfg.gameplay.rank4_speed_mult;
                 tank.turn_slide_time = cfg.gameplay.turn_slide_time;
+                tank.sand_speed_mult = cfg.gameplay.sand_speed_mult;
                 tank.apply_rank(ranks.get(i).copied().unwrap_or(0));
                 let mut p = Player::new(tank, k, tile, cfg.tile_size, &cfg.gameplay);
                 p.score = scores.get(i).copied().unwrap_or(0);
@@ -345,6 +346,7 @@ impl Game {
         self.pending = waiting;
         for (mut tank, _) in ready {
             tank.frozen = frozen_now;
+            tank.sand_speed_mult = self.tuning.sand_speed_mult;
             self.enemies.push(tank);
         }
 
@@ -473,12 +475,16 @@ impl Game {
                     self.sfx.push(Sfx::PlayerBoom);
                 }
             } else if let Some(e) = self.enemies.iter_mut().find(|e| e.id == id) {
+                // Как в оригинале: бонус выпадает при ПЕРВОМ попадании
+                // в мигающий танк (у бронированного — не после 4-го),
+                // после чего танк перестаёт мигать.
                 let was_bonus = e.is_bonus;
+                e.is_bonus = false;
                 e.take_hit();
                 if e.alive {
                     self.sfx.push(Sfx::HitArmor);
                 }
-                if !e.alive && was_bonus {
+                if was_bonus {
                     pending_bonuses += 1;
                 }
                 if !e.alive {

@@ -161,12 +161,33 @@ impl Bullet {
             && a.pos.y + a.size > b.pos.y
     }
 
+    /// Снаряд: вытянутый корпус с острым носом и маленькая реактивная
+    /// струя сзади (несколько пикселей, мерцает). Рисунок чуть больше
+    /// хитбокса — сталкивается пуля по-прежнему квадратом `size`.
     pub fn draw(&self) {
         if !self.alive { return; }
-        let color = match self.owner_team {
-            Team::Player => YELLOW,
-            Team::Enemy  => LIGHTGRAY,
+        let (body, tip) = match self.owner_team {
+            Team::Player => (Color::new(1.0, 0.85, 0.2, 1.0), Color::new(1.0, 1.0, 0.85, 1.0)),
+            Team::Enemy  => (Color::new(0.75, 0.75, 0.8, 1.0), Color::new(1.0, 1.0, 1.0, 1.0)),
         };
-        draw_rectangle(self.pos.x, self.pos.y, self.size, self.size, color);
+        let s = self.size;
+        let c = self.pos + vec2(s, s) / 2.0;
+        let v = self.direction.vector();
+        let d = vec2(v.x as f32, v.y as f32); // вперёд
+        let p = vec2(-d.y, d.x);              // поперёк
+        let w = s * 0.42;                     // полуширина корпуса
+
+        // Реактивная струя: короткий мерцающий язычок позади.
+        let flick = if ((get_time() * 30.0) as i32) % 2 == 0 { 1.0 } else { 0.7 };
+        let tail = c - d * s * 0.7;
+        draw_triangle(tail + p * w * 0.7, tail - p * w * 0.7, tail - d * s * 0.9 * flick, Color::new(1.0, 0.5, 0.1, 0.9));
+        draw_triangle(tail + p * w * 0.35, tail - p * w * 0.35, tail - d * s * 0.5 * flick, Color::new(1.0, 0.95, 0.5, 1.0));
+
+        // Корпус (прямоугольник вдоль полёта) и острый нос.
+        let back = c - d * s * 0.7;
+        let front = c + d * s * 0.35;
+        draw_triangle(back + p * w, back - p * w, front + p * w, body);
+        draw_triangle(back - p * w, front - p * w, front + p * w, body);
+        draw_triangle(front + p * w, front - p * w, c + d * s * 0.95, tip);
     }
 }

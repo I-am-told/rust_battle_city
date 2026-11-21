@@ -1,5 +1,5 @@
 use macroquad::prelude::*;
-use crate::map::GameMap;
+use crate::map::{GameMap, Tile};
 use crate::entities::bullet::{Bullet, BulletSpec};
 use crate::entities::enemy_kind::EnemyKind;
 
@@ -76,6 +76,8 @@ pub struct Tank {
     pub rank4_speed_mult: f32,
     /// Время доезда до поворота в режиме Smooth (gameplay.turn_slide_time).
     pub turn_slide_time: f32,
+    /// Во сколько раз медленнее на песке (gameplay.sand_speed_mult).
+    pub sand_speed_mult: f32,
 }
 
 impl Tank {
@@ -111,6 +113,7 @@ impl Tank {
             ice_slide_tiles: 1.0,
             rank4_speed_mult: 1.3,
             turn_slide_time: 0.1,
+            sand_speed_mult: 0.5,
         }
     }
 
@@ -459,6 +462,12 @@ impl Tank {
         others: &[Tank],
         tile_size: f32,
     ) {
+        // На песке любой танк едет медленнее.
+        let dist = if map.touches(self.pos, vec2(self.size, self.size), tile_size, Tile::Sand) {
+            dist * self.sand_speed_mult
+        } else {
+            dist
+        };
         let axis = vec2(dir.vector().x as f32, dir.vector().y as f32);
         let target = self.pos + axis * dist;
 

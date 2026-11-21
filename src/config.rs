@@ -118,6 +118,8 @@ pub struct Gameplay {
     pub ice_slide_tiles: f32,
     /// Во сколько раз быстрее танк игрока на 4-м ранге.
     pub rank4_speed_mult: f32,
+    /// Скорость любого танка на песке (0.5 — вдвое медленнее).
+    pub sand_speed_mult: f32,
     /// Скорость врагов относительно tank_speed (у быстрых — ещё ×2).
     pub enemy_speed_mult: f32,
     /// Скорость вражеских пуль относительно bullet_speed.
@@ -143,6 +145,7 @@ impl Default for Gameplay {
             turn_slide_time: 0.1,
             ice_slide_tiles: 1.0,
             rank4_speed_mult: 1.3,
+            sand_speed_mult: 0.5,
             enemy_speed_mult: 0.75,
             enemy_bullet_speed_mult: 0.75,
             extra_life_every: 20_000,
