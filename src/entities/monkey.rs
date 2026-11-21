@@ -61,7 +61,7 @@ impl Cloud {
     }
 }
 
-/// Обезьянка. Стоит рядом с точкой появления P1 и стреляет облачками.
+/// Обезьянка. Летает вокруг сына (оберегает его) и стреляет облачками.
 pub struct Monkey {
     /// Центр обезьянки.
     pub pos: Vec2,
@@ -76,11 +76,22 @@ pub struct Monkey {
     /// Сколько прошло с последнего выстрела (анимация «пука»).
     pub since_shot: f32,
     age: f32,
+    /// Угол на круге вокруг охраняемого игрока, радиан.
+    orbit: f32,
 }
 
 impl Monkey {
     pub fn new(pos: Vec2, size: f32, time: f32) -> Self {
-        Self { pos, size, time_left: time, cooldown: 0.3, aim: vec2(0.0, -1.0), since_shot: 10.0, age: 0.0 }
+        Self { pos, size, time_left: time, cooldown: 0.3, aim: vec2(0.0, -1.0), since_shot: 10.0, age: 0.0, orbit: std::f32::consts::PI }
+    }
+
+    /// Облёт вокруг `center` по кругу радиуса `radius` со скоростью `turns`
+    /// оборотов в секунду. Обезьянка плавно догоняет свою точку на круге —
+    /// если сын уехал или переместился, она «подлетает» к нему, а не прыгает.
+    pub fn orbit_around(&mut self, center: Vec2, radius: f32, turns: f32, dt: f32) {
+        self.orbit = (self.orbit + std::f32::consts::TAU * turns * dt) % std::f32::consts::TAU;
+        let target = center + vec2(self.orbit.cos(), self.orbit.sin()) * radius;
+        self.pos += (target - self.pos) * (dt * 6.0).min(1.0);
     }
 
     pub fn tick(&mut self, dt: f32) {

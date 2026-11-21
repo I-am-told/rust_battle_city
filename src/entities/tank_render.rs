@@ -68,6 +68,25 @@ struct Look {
     racer: bool,
     /// Три ствола (ранг 7 — три пули).
     triple: bool,
+    /// Ширина гусениц.
+    track_w: f32,
+    /// Форма башни.
+    turret: Turret,
+    /// Задний спойлер во всю ширину (быстрый враг).
+    spoiler: bool,
+    /// Ящик на корме (мощный враг).
+    ammo_box: bool,
+    /// Бортовые экраны поверх гусениц и лобовой отвал (бронированный враг).
+    skirts: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Turret {
+    Round,
+    /// Квадратная, со скосами — мощный враг.
+    Square,
+    /// Широкая «шайба» с люком — бронированный враг.
+    Dome,
 }
 
 fn look_for(tank: &Tank) -> Look {
@@ -81,11 +100,31 @@ fn look_for(tank: &Tank) -> Look {
         muzzle: false,
         racer: false,
         triple: false,
+        track_w: 0.22,
+        turret: Turret::Round,
+        spoiler: false,
+        ammo_box: false,
+        skirts: false,
     };
     match tank.kind {
-        Some(EnemyKind::Fast) => Look { hull_inset: 0.25, turret_r: 0.15, barrel_w: 0.09, wedge: true, ..base },
-        Some(EnemyKind::Power) => Look { barrel_w: 0.15, barrel_tip: 0.0, muzzle: true, ..base },
-        Some(EnemyKind::Armored) => Look { hull_inset: 0.17, turret_r: 0.23, barrel_w: 0.14, plates: true, ..base },
+        // Враги различаются силуэтом, не только цветом:
+        // обычный — классический танк с круглой башней;
+        // быстрый — узкий, тонкие гусеницы, скошенный нос, спойлер сзади;
+        // мощный — квадратная башня, короткий толстый ствол с тормозом, ящик на корме;
+        // бронированный — экраны на гусеницах, отвал спереди, большая башня-шайба.
+        Some(EnemyKind::Basic) => base,
+        Some(EnemyKind::Fast) => Look {
+            hull_inset: 0.27, turret_r: 0.13, barrel_w: 0.08, track_w: 0.16,
+            wedge: true, spoiler: true, ..base
+        },
+        Some(EnemyKind::Power) => Look {
+            turret_r: 0.21, barrel_w: 0.2, barrel_tip: 0.08, muzzle: true,
+            turret: Turret::Square, ammo_box: true, ..base
+        },
+        Some(EnemyKind::Armored) => Look {
+            hull_inset: 0.17, turret_r: 0.26, barrel_w: 0.13, track_w: 0.24,
+            turret: Turret::Dome, skirts: true, ..base
+        },
         // Игрок меняется с каждой звездой:
         // 0 — лёгкий танк;
         // 1 — длинный ствол с дульным тормозом (быстрые пули);
@@ -107,7 +146,6 @@ fn look_for(tank: &Tank) -> Look {
                 muzzle: true, plates: true, racer: true, triple: r >= 7, ..base
             },
         },
-        _ => base,
     }
 }
 
@@ -190,7 +228,7 @@ impl Tank {
         let light = tint(color, 0.45);
 
         // Гусеницы с траками. Траки сдвигаются с пройденным путём.
-        let track_w = 0.22;
+        let track_w = look.track_w;
         let phase = (self.odometer / self.size * 4.0).fract();
         for x in [0.0, 1.0 - track_w] {
             pen.rect(x, 0.04, track_w, 0.92, darker);
@@ -200,6 +238,18 @@ impl Tank {
                 let (y0, y1) = (y.max(0.04), (y + 0.06).min(0.96));
                 if y1 > y0 {
                     pen.rect(x + 0.02, y0, track_w - 0.04, y1 - y0, dark);
+                }
+            }
+        }
+
+        if look.skirts {
+            // Бортовые экраны с болтами — закрывают гусеницы почти целиком.
+            let steel = shade(color, 0.75);
+            for x in [0.0, 1.0 - track_w] {
+                pen.rect(x, 0.1, track_w, 0.8, darker);
+                pen.rect(x + 0.02, 0.12, track_w - 0.04, 0.76, steel);
+                for y in [0.2, 0.4, 0.6, 0.8] {
+                    pen.circle(x + track_w / 2.0, y, 0.025, light);
                 }
             }
         }
@@ -216,6 +266,23 @@ impl Tank {
             // Скошенный нос: две ступеньки.
             pen.rect(hx + 0.06, hy - 0.06, hw - 0.12, 0.06, color);
             pen.rect(hx + 0.12, hy - 0.11, hw - 0.24, 0.05, light);
+        }
+        if look.spoiler {
+            // Спойлер на стойках поперёк кормы.
+            pen.rect(0.36, 0.84, 0.06, 0.08, darker);
+            pen.rect(0.58, 0.84, 0.06, 0.08, darker);
+            pen.rect(0.04, 0.9, 0.92, 0.07, dark);
+            pen.rect(0.04, 0.9, 0.92, 0.025, light);
+        }
+        if look.ammo_box {
+            pen.rect(0.3, 0.8, 0.4, 0.14, darker);
+            pen.rect(0.33, 0.82, 0.34, 0.1, dark);
+            pen.rect(0.48, 0.82, 0.04, 0.1, darker);
+        }
+        if look.skirts {
+            // Лобовой отвал во всю ширину.
+            pen.rect(0.02, 0.06, 0.96, 0.09, darker);
+            pen.rect(0.04, 0.07, 0.92, 0.04, light);
         }
         if look.plates {
             pen.rect(hx - 0.02, 0.3, 0.08, 0.4, light);
@@ -246,10 +313,33 @@ impl Tank {
             pen.rect(bx - 0.04, look.barrel_tip, look.barrel_w + 0.08, 0.08, dark);
         }
 
-        // Башня: круг с бликом.
-        pen.circle(0.5, 0.56, look.turret_r, dark);
-        pen.circle(0.5, 0.56, look.turret_r * 0.82, color);
-        pen.circle(0.46, 0.52, look.turret_r * 0.35, light);
+        // Башня.
+        let r = look.turret_r;
+        match look.turret {
+            Turret::Round => {
+                pen.circle(0.5, 0.56, r, dark);
+                pen.circle(0.5, 0.56, r * 0.82, color);
+                pen.circle(0.46, 0.52, r * 0.35, light);
+            }
+            Turret::Square => {
+                // Квадрат со срезанными углами (крест из двух прямоугольников).
+                let c = r * 0.3;
+                pen.rect(0.5 - r, 0.56 - r + c, 2.0 * r, 2.0 * (r - c), dark);
+                pen.rect(0.5 - r + c, 0.56 - r, 2.0 * (r - c), 2.0 * r, dark);
+                let i = r * 0.8;
+                pen.rect(0.5 - i, 0.56 - i, 2.0 * i, 2.0 * i, color);
+                pen.rect(0.5 - i, 0.56 - i, 2.0 * i, 0.04, light);
+                pen.rect(0.5 - i, 0.56 - i, 0.04, 2.0 * i, light);
+            }
+            Turret::Dome => {
+                pen.circle(0.5, 0.56, r, darker);
+                pen.circle(0.5, 0.56, r * 0.86, dark);
+                pen.circle(0.5, 0.56, r * 0.7, color);
+                // Люк командира.
+                pen.circle(0.5, 0.6, r * 0.3, dark);
+                pen.circle(0.5, 0.6, r * 0.2, light);
+            }
+        }
     }
 
     /// Два боковых ствола 7-го ранга (три пули) — по бокам от главного.

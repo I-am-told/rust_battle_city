@@ -3,7 +3,7 @@ use crate::ui_text::{draw_text, measure_text};
 use crate::config::Config;
 use crate::input::KeyBindings;
 use crate::map::GameMap;
-use crate::entities::tank::{Tank, Direction, Team, TurnAssist};
+use crate::entities::tank::{AiGoal, Tank, Direction, Team, TurnAssist};
 use crate::entities::bullet::{Bullet, BulletHit, BulletSpec};
 use crate::map::WallHit;
 use crate::sound::Sfx;
@@ -401,7 +401,35 @@ impl Game {
             }
         }
 
+        // Второй круг карт и дальше — враги «умнее».
+        let smart = self.smart_ai();
+        let base_center = self.map.base_origin
+            .filter(|_| !self.map.base_destroyed)
+            .map(|o| (o.as_vec2() + vec2(1.0, 1.0)) * self.tile_size);
+        let player_centers: Vec<Vec2> = self.players.iter()
+            .filter(|p| p.tank.alive)
+            .map(|p| p.tank.pos + vec2(p.tank.size, p.tank.size) / 2.0)
+            .collect();
+        let bias = self.tuning.smart_ai_bias;
+        let tile_size = self.tile_size;
+
         for (i, enemy) in self.enemies.iter_mut().enumerate() {
+            // Цель умного врага: «охотники» (нечётный id) — за ближайшим игроком,
+            // остальные — к штабу; но игрока в 5 тайлах атакует любой.
+            let goal = if smart && bias > 0.0 {
+                let me = enemy.pos + vec2(enemy.size, enemy.size) / 2.0;
+                let nearest = player_centers.iter().copied()
+                    .min_by(|a, b| (*a - me).length().total_cmp(&(*b - me).length()));
+                let close = nearest.filter(|p| (*p - me).length() < 5.0 * tile_size);
+                let target = close
+                    .or(if enemy.id % 2 == 1 { nearest } else { None })
+                    .or(base_center)
+                    .or(nearest);
+                target.map(|t| AiGoal { target: t, bias })
+            } else {
+                None
+            };
+            enemy.ai_goal = goal;
             // Замороженные часами и одурманенные облачком — стоят.
             if !enemy.alive || enemy.frozen || enemy.gassed { continue; }
 
@@ -644,6 +672,21 @@ impl Game {
         self.difficulty == Difficulty::Easy && self.players.len() >= 2
     }
 
+    /// Центр того, кого оберегает обезьянка: сын (P2), в игре на одного — P1.
+    /// Пока игрок ждёт возрождения — его точка появления.
+    pub(crate) fn guarded_center(&self) -> Option<Vec2> {
+        let p = self.players.get(1).or(self.players.first())?;
+        let half = vec2(self.tank_size, self.tank_size) / 2.0;
+        Some(if p.tank.alive { p.tank.pos } else { p.spawn } + half)
+    }
+
+    /// Враги «умнее» со второго круга карт: уровень больше числа карт
+    /// (без папки levels — после 15-го уровня).
+    pub fn smart_ai(&self) -> bool {
+        let maps = match self.levels.maps.len() { 0 => 15, n => n };
+        self.current_level as usize > maps
+    }
+
     /// Тайл, где сейчас сын (P2), или его точка появления.
     fn son_tile(&self) -> Option<IVec2> {
         let p = self.players.get(1)?;
@@ -748,8 +791,13 @@ impl Game {
     /// врага; облачко летит сквозь стены и навсегда усыпляет первого,
     /// кого заденет.
     fn monkey_step(&mut self, dt: f32) {
+        let guarded = self.guarded_center();
         if let Some(m) = &mut self.monkey {
             m.tick(dt);
+            if let Some(c) = guarded {
+                let r = self.tuning.monkey_orbit_radius * self.tank_size;
+                m.orbit_around(c, r, self.tuning.monkey_orbit_speed, dt);
+            }
             if m.cooldown <= 0.0 {
                 let target = self
                     .enemies

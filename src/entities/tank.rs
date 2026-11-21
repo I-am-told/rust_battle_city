@@ -60,6 +60,8 @@ pub struct Tank {
     pub max_hp: u8,
     pub ai_dir_timer: f32,
     pub ai_shoot_timer: f32,
+    /// Цель «умного» врага на этот кадр (ставит игра; None — ездит случайно).
+    pub ai_goal: Option<AiGoal>,
     pub turn_assist: TurnAssist,
     /// Номер игрока (0 — P1, 1 — P2); для врагов не используется.
     pub player_slot: u8,
@@ -86,6 +88,15 @@ pub struct Tank {
     pub gassed: bool,
 }
 
+/// Цель «умного» врага (со второго круга карт): куда стремиться и
+/// насколько упорно (0 — как обычный, 1 — всегда к цели).
+#[derive(Clone, Copy, Debug)]
+pub struct AiGoal {
+    /// Центр цели в пикселях (игрок или штаб).
+    pub target: Vec2,
+    pub bias: f32,
+}
+
 impl Tank {
     pub fn new(pos: Vec2, direction: Direction, size: f32, speed: f32) -> Self {
         Self {
@@ -110,6 +121,7 @@ impl Tank {
             max_hp: 1,
             ai_dir_timer: 0.0,
             ai_shoot_timer: 0.0,
+            ai_goal: None,
             turn_assist: TurnAssist::Off,
             player_slot: 0,
             slide_target: None,
@@ -340,12 +352,13 @@ impl Tank {
         }
 
         self.prev_pos = self.pos;
+        let goal = self.ai_goal;
 
         self.ai_dir_timer -= dt;
 
         if self.ai_dir_timer <= 0.0 {
-            self.choose_new_direction(map, others, tile_size);
-            self.ai_dir_timer = 2.0 + rand::gen_range(0.0, 2.0);
+            self.choose_new_direction(map, others, tile_size, goal);
+            self.ai_dir_timer = Self::dir_time(goal);
         }
 
         let before = self.pos;
@@ -354,21 +367,83 @@ impl Tank {
         let moved = (self.pos - before).length_squared() > 0.01;
 
         if !moved {
-            self.choose_new_direction(map, others, tile_size);
-            self.ai_dir_timer = 2.0 + rand::gen_range(0.0, 2.0);
+            self.choose_new_direction(map, others, tile_size, goal);
+            self.ai_dir_timer = Self::dir_time(goal);
         }
 
         self.ai_shoot_timer -= dt;
         if self.ai_shoot_timer <= 0.0 {
             self.ai_shoot_timer = 0.3 + rand::gen_range(0.0, 1.2);
+            // Умный враг: цель на одной линии — с шансом `bias` разворачивается к ней
+            // и стреляет. Иногда «зевает» — чтобы не был слишком метким.
+            if let Some(g) = goal {
+                if let Some(d) = self.line_to(g.target) {
+                    if d != self.direction && rand::gen_range(0.0, 1.0) < g.bias && self.can_snap(map, others, tile_size) {
+                        self.turn_to(d, map, others, tile_size);
+                        self.ai_dir_timer = self.ai_dir_timer.max(0.8);
+                    }
+                }
+            }
             return self.try_fire(active_bullets, map, tile_size, bullet.speed, bullet.size);
         }
 
         None
     }
 
-    fn choose_new_direction(&mut self, map: &GameMap, others: &[Tank], tile_size: f32) {
+    /// Можно ли выровняться по сетке без наезда на стену/танк (для поворота ИИ).
+    fn can_snap(&self, map: &GameMap, others: &[Tank], tile_size: f32) -> bool {
+        let snapped = vec2(
+            (self.pos.x / tile_size).round() * tile_size,
+            (self.pos.y / tile_size).round() * tile_size,
+        );
+        self.is_clear_at_px(snapped, map, others, tile_size)
+    }
+
+    /// Сколько ехать в выбранную сторону до следующего решения.
+    fn dir_time(goal: Option<AiGoal>) -> f32 {
+        match goal {
+            Some(_) => 1.2 + rand::gen_range(0.0, 1.5),
+            None => 2.0 + rand::gen_range(0.0, 2.0),
+        }
+    }
+
+    /// Направление на `target`, если он на одной линии с танком (по горизонтали
+    /// или вертикали, с допуском меньше половины танка).
+    fn line_to(&self, target: Vec2) -> Option<Direction> {
+        let d = target - (self.pos + vec2(self.size, self.size) / 2.0);
+        let tol = self.size * 0.4;
+        if d.x.abs() < tol {
+            Some(if d.y < 0.0 { Direction::Up } else { Direction::Down })
+        } else if d.y.abs() < tol {
+            Some(if d.x < 0.0 { Direction::Left } else { Direction::Right })
+        } else {
+            None
+        }
+    }
+
+    fn choose_new_direction(&mut self, map: &GameMap, others: &[Tank], tile_size: f32, goal: Option<AiGoal>) {
         let origin = self.tile_origin(tile_size);
+
+        // Умный враг: с шансом `bias` едет в ту свободную сторону, что ближе
+        // всего ведёт к цели (может и продолжить ехать прямо).
+        if let Some(g) = goal {
+            if rand::gen_range(0.0, 1.0) < g.bias {
+                let to = (g.target - (self.pos + vec2(self.size, self.size) / 2.0)).normalize_or_zero();
+                let best = Direction::all()
+                    .into_iter()
+                    .filter(|d| self.is_clear_at_grid(origin + d.vector(), map, others, tile_size))
+                    .max_by(|a, b| to.dot(a.vector().as_vec2()).total_cmp(&to.dot(b.vector().as_vec2())));
+                if let Some(d) = best {
+                    if d != self.direction && self.can_snap(map, others, tile_size) {
+                        self.turn_to(d, map, others, tile_size);
+                        return;
+                    }
+                    if d == self.direction {
+                        return;
+                    }
+                }
+            }
+        }
 
         let mut alternatives: Vec<Direction> = Vec::new();
         for d in Direction::all() {

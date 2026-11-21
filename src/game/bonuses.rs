@@ -60,8 +60,9 @@ impl Game {
             }
             BonusKind::Mama => {
                 // Обезьянка садится левее точки появления P1.
-                let p1 = self.players[0].spawn;
-                let pos = p1 + macroquad::prelude::vec2(-self.tile_size * 1.5, self.tank_size / 2.0);
+                // Появляется слева от сына и сразу начинает облетать его.
+                let pos = self.guarded_center().unwrap_or_default()
+                    - macroquad::prelude::vec2(tuning.monkey_orbit_radius * self.tank_size, 0.0);
                 let time = tuning.mama_time;
                 self.monkey = Some(crate::entities::monkey::Monkey::new(pos, self.tank_size, time));
                 println!("Mama picked! Monkey for {time}s");

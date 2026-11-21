@@ -130,6 +130,14 @@ pub struct Gameplay {
     pub monkey_fire_interval: f32,
     /// Скорость облачка, тайлов в секунду.
     pub cloud_speed: f32,
+    /// Насколько «умны» враги со второго круга карт: шанс, что враг поедет
+    /// к цели (игрок/штаб) и развернётся к ней, если она на одной линии.
+    /// 0 — враги всегда ездят случайно; 1 — всегда к цели.
+    pub smart_ai_bias: f32,
+    /// Обезьянка «мама»: радиус круга вокруг сына (в размерах танка)
+    /// и скорость облёта, оборотов в секунду.
+    pub monkey_orbit_radius: f32,
+    pub monkey_orbit_speed: f32,
     /// Скорость врагов относительно tank_speed (у быстрых — ещё ×2).
     pub enemy_speed_mult: f32,
     /// Скорость вражеских пуль относительно bullet_speed.
@@ -161,6 +169,9 @@ impl Default for Gameplay {
             mama_time: 10.0,
             monkey_fire_interval: 0.6,
             cloud_speed: 7.0,
+            smart_ai_bias: 0.6,
+            monkey_orbit_radius: 1.0,
+            monkey_orbit_speed: 0.35,
             enemy_speed_mult: 0.75,
             enemy_bullet_speed_mult: 0.75,
             extra_life_every: 20_000,
