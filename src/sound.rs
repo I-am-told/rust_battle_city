@@ -40,6 +40,8 @@ pub enum Sfx {
     GameOver,
     /// Телепорт-защитник (ранг 6).
     Teleport,
+    /// Обезьянка пукает (бонус «мама»).
+    Fart,
 }
 
 const RATE: u32 = 22_050;
@@ -199,6 +201,25 @@ fn samples(s: Sfx) -> Vec<f32> {
             t(Triangle, 300.0, 1800.0, 0.12, 0.45, 0.2),
             t(Square(0.25), 2093.0, 2093.0, 0.08, 0.15, 1.0),
         ]),
+        // Пук: низкое «пррр» с дрожанием высоты — шум + квадрат.
+        Sfx::Fart => mix(
+            {
+                let mut v = Vec::new();
+                let n = (0.38 * RATE as f32) as usize;
+                let mut ph = 0.0f32;
+                for i in 0..n {
+                    let k = i as f32 / n as f32;
+                    // Частота «булькает» вокруг 90 Гц и уходит вниз.
+                    let f = 95.0 - 30.0 * k + 18.0 * (i as f32 / RATE as f32 * 38.0).sin();
+                    ph = (ph + f / RATE as f32).fract();
+                    let sq = if ph < 0.35 { 1.0 } else { -1.0 };
+                    let env = (1.0 - k).powf(0.7) * (i as f32 / (RATE as f32 * 0.01)).min(1.0);
+                    v.push(sq * env * 0.45);
+                }
+                v
+            },
+            tones(&[t(Noise, 400.0, 150.0, 0.38, 0.25, 0.8)]),
+        ),
         // Грустный спуск.
         Sfx::GameOver => mix(
             tones(&melody(&[(G5, 0.22), (E5, 0.22), (D5, 0.22), (C5, 0.6)], 0.5, 0.22)),
@@ -248,10 +269,11 @@ pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
     b
 }
 
-pub const ALL_SFX: [Sfx; 14] = [
+pub const ALL_SFX: [Sfx; 15] = [
     Sfx::Shot, Sfx::HitBrick, Sfx::HitSteel, Sfx::HitArmor, Sfx::EnemyBoom,
     Sfx::PlayerBoom, Sfx::BaseBoom, Sfx::BonusAppear, Sfx::BonusPickup,
     Sfx::LifeUp, Sfx::Pause, Sfx::LevelStart, Sfx::GameOver, Sfx::Teleport,
+    Sfx::Fart,
 ];
 
 // ---------- воспроизведение ----------

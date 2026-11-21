@@ -168,6 +168,9 @@ impl Tank {
         if self.invulnerable {
             self.draw_shield();
         }
+        if self.gassed {
+            self.draw_gas();
+        }
     }
 
     fn draw_body(&self, color: Color) {
@@ -281,6 +284,19 @@ impl Tank {
             _ => (x, y + s * (1.0 - k.fract())),
         };
         draw_circle(bx, by, self.size * 0.07, light);
+    }
+
+    /// Зелёная дымка вокруг врага, попавшего под облачко «мамы».
+    fn draw_gas(&self) {
+        let c = self.pos + vec2(self.size, self.size) / 2.0;
+        let t = get_time() as f32;
+        for i in 0..7 {
+            let a = i as f32 * std::f32::consts::TAU / 7.0 + t * 0.7;
+            let d = self.size * (0.32 + 0.06 * (t * 2.0 + i as f32).sin());
+            let p = c + vec2(a.cos(), a.sin()) * d;
+            draw_circle(p.x, p.y, self.size * 0.24, Color::new(0.55, 0.85, 0.45, 0.35));
+        }
+        draw_circle(c.x, c.y, self.size * 0.4, Color::new(0.8, 1.0, 0.75, 0.25));
     }
 
     /// Защитное поле после появления: мерцающее кольцо с искрами.

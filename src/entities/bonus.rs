@@ -14,6 +14,9 @@ pub enum BonusKind {
     Shovel,
     /// Каска — защитное поле на время.
     Helmet,
+    /// «Мама» (только лёгкий режим): обезьянка пукает облачками,
+    /// враги навсегда замирают в зелёной дымке. Бонус огромный — 3×3 танка.
+    Mama,
 }
 
 impl BonusKind {
@@ -37,6 +40,7 @@ impl BonusKind {
             BonusKind::Timer   => SKYBLUE,
             BonusKind::Shovel  => ORANGE,
             BonusKind::Helmet  => WHITE,
+            BonusKind::Mama    => PINK,
         }
     }
 }
@@ -86,10 +90,15 @@ impl Bonus {
         if !self.alive { return; }
 
         // Мигание: 3 раза в секунду; за 3 секунды до исчезновения — чаще.
-        let rate = if self.lifetime < 3.0 { 8.0 } else { 3.0 };
-        if ((get_time() * rate) as i32) % 2 != 0 { return; }
+        // «Мама» не мигает (чтобы сын успел прочитать), только в конце.
+        let rate = if self.lifetime < 3.0 { 8.0 } else if self.kind == BonusKind::Mama { 0.0 } else { 3.0 };
+        if rate > 0.0 && ((get_time() * rate) as i32) % 2 != 0 { return; }
 
         let (x, y, s) = (self.pos.x, self.pos.y, self.size);
+        if self.kind == BonusKind::Mama {
+            draw_mama(x, y, s);
+            return;
+        }
         draw_rectangle(x, y, s, s, Color::new(0.05, 0.05, 0.1, 0.9));
         draw_rectangle_lines(x + 1.0, y + 1.0, s - 2.0, s - 2.0, s * 0.05, self.kind.accent_color());
         draw_bonus_icon(self.kind, x + s * 0.12, y + s * 0.12, s * 0.76);
@@ -165,6 +174,11 @@ pub fn draw_bonus_icon(kind: BonusKind, x: f32, y: f32, s: f32) {
             draw_triangle(p(0.28, 0.8), p(0.72, 0.8), p(0.5, 0.98), grey);
             draw_rectangle(x + 0.32 * s, y + 0.52 * s, 0.08 * s, 0.26 * s, white);
         }
+        // «Мама» рисуется отдельно (draw_mama) — здесь значок для мелких мест.
+        BonusKind::Mama => {
+            draw_rectangle(x, y, s, s, PINK);
+            draw_mama_word(x + s * 0.05, y + s * 0.3, s * 0.9, s * 0.4, WHITE);
+        }
         BonusKind::Helmet => {
             // Каска: купол, козырёк и звёздочка.
             let shell = Color::new(0.3, 0.55, 0.3, 1.0);
@@ -180,6 +194,64 @@ pub fn draw_bonus_icon(kind: BonusKind, x: f32, y: f32, s: f32) {
                 draw_triangle(c, tip, c + vec2((a + 1.2).cos(), (a + 1.2).sin()) * 0.05 * s, RED);
                 draw_triangle(c, tip, c + vec2((a - 1.2).cos(), (a - 1.2).sin()) * 0.05 * s, RED);
             }
+        }
+    }
+}
+
+/// Огромный бонус «мама»: розовая табличка с сердечком и надписью МАМА.
+fn draw_mama(x: f32, y: f32, s: f32) {
+    let pulse = 1.0 + 0.04 * (get_time() as f32 * 4.0).sin();
+    let pink = Color::new(1.0, 0.45, 0.7, 0.95);
+    let deep = Color::new(0.75, 0.15, 0.45, 1.0);
+    let r = s * 0.12;
+    // Скруглённая табличка.
+    draw_rectangle(x + r, y, s - 2.0 * r, s, pink);
+    draw_rectangle(x, y + r, s, s - 2.0 * r, pink);
+    for (cx, cy) in [(x + r, y + r), (x + s - r, y + r), (x + r, y + s - r), (x + s - r, y + s - r)] {
+        draw_circle(cx, cy, r, pink);
+    }
+    draw_rectangle_lines(x + s * 0.03, y + s * 0.03, s * 0.94, s * 0.94, s * 0.025, WHITE);
+    // Сердечко сверху.
+    let hc = vec2(x + s * 0.5, y + s * 0.27);
+    let hr = s * 0.09 * pulse;
+    draw_circle(hc.x - hr * 0.7, hc.y, hr, RED);
+    draw_circle(hc.x + hr * 0.7, hc.y, hr, RED);
+    draw_triangle(
+        vec2(hc.x - hr * 1.65, hc.y + hr * 0.3),
+        vec2(hc.x + hr * 1.65, hc.y + hr * 0.3),
+        vec2(hc.x, hc.y + hr * 2.2),
+        RED,
+    );
+    // Надпись МАМА: тень и белые буквы.
+    let (tw, th) = (s * 0.84 * pulse, s * 0.3 * pulse);
+    let (tx, ty) = (x + (s - tw) / 2.0, y + s * 0.52);
+    draw_mama_word(tx + s * 0.012, ty + s * 0.012, tw, th, deep);
+    draw_mama_word(tx, ty, tw, th, WHITE);
+}
+
+/// Слово «МАМА» линиями (в шрифте нет кириллицы): 4 буквы в прямоугольнике.
+pub fn draw_mama_word(x: f32, y: f32, w: f32, h: f32, color: Color) {
+    let lw = w / 4.0;
+    let th = lw * 0.17;
+    for i in 0..4 {
+        let l = x + i as f32 * lw + lw * 0.1;
+        let r = x + (i + 1) as f32 * lw - lw * 0.1;
+        let (top, bot) = (y, y + h);
+        let mid = (l + r) / 2.0;
+        if i % 2 == 0 {
+            // М: две стойки и «галочка» к середине.
+            draw_line(l, bot, l, top, th, color);
+            draw_line(r, bot, r, top, th, color);
+            draw_line(l, top, mid, top + h * 0.6, th, color);
+            draw_line(mid, top + h * 0.6, r, top, th, color);
+            draw_circle(l, top, th / 2.0, color);
+            draw_circle(r, top, th / 2.0, color);
+        } else {
+            // А: две наклонные и перекладина.
+            draw_line(l, bot, mid, top, th, color);
+            draw_line(mid, top, r, bot, th, color);
+            draw_line(l + (r - l) * 0.22, top + h * 0.62, r - (r - l) * 0.22, top + h * 0.62, th, color);
+            draw_circle(mid, top, th / 2.0, color);
         }
     }
 }

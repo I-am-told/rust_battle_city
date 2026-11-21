@@ -11,6 +11,7 @@ use crate::entities::spawner::EnemySpawner;
 use crate::config::{Difficulty, Gameplay};
 use crate::entities::bonus::{Bonus, BonusKind};
 use crate::entities::effects::{draw_spawn_star, Effect, EffectKind};
+use crate::entities::monkey::{Cloud, Monkey};
 use crate::game::level::LevelConfig;
 use crate::game::hud::{self, draw_tank_icon};
 use crate::entities::enemy_kind::EnemyKind;
@@ -67,6 +68,10 @@ pub struct Game {
     pub bonuses: Vec<Bonus>,
     /// Взрывы.
     pub effects: Vec<Effect>,
+    /// Обезьянка бонуса «мама» (пока действует).
+    pub monkey: Option<Monkey>,
+    /// Облачки обезьянки в полёте.
+    pub clouds: Vec<Cloud>,
     /// Звуковые события за кадр (main забирает и проигрывает).
     pub sfx: Vec<Sfx>,
     /// Взрыв штаба уже показан.
@@ -215,6 +220,8 @@ impl Game {
             bullets: Vec::new(),
             bonuses: Vec::new(),
             effects: Vec::new(),
+            monkey: None,
+            clouds: Vec::new(),
             sfx: vec![Sfx::LevelStart],
             base_exploded: false,
             freeze_timer: 0.0,
@@ -395,7 +402,8 @@ impl Game {
         }
 
         for (i, enemy) in self.enemies.iter_mut().enumerate() {
-            if !enemy.alive || enemy.frozen { continue; }
+            // Замороженные часами и одурманенные облачком — стоят.
+            if !enemy.alive || enemy.frozen || enemy.gassed { continue; }
 
             let active = self.bullets
                 .iter()
@@ -435,6 +443,9 @@ impl Game {
             // Сначала звёздочка, танк выедет через spawn_star_time.
             self.pending.push((new_enemy, 0.0));
         }
+
+        // Бонус «мама»: обезьянка и её облачка.
+        self.monkey_step(dt);
 
         // Ранг 6: телепорт-защитник — до того, как пули полетят.
         self.guardian_step();
@@ -551,6 +562,10 @@ impl Game {
                     if son_rules {
                         bonus.kind = self.easy_bonus_kind();
                     }
+                    if bonus.kind == BonusKind::Mama {
+                        bonus.size = self.tank_size * 3.0;
+                        bonus.pos = self.mama_pos(pos);
+                    }
                     self.bonuses.push(bonus);
                     self.sfx.push(Sfx::BonusAppear);
                     forbidden.push(tile);
@@ -651,6 +666,12 @@ impl Game {
             (BonusKind::Timer, 1),
             (BonusKind::Shovel, if wall <= 0.5 { 1 + 8 } else if wall <= 0.7 { 1 + 2 } else { 1 }),
             (BonusKind::Helmet, 1),
+            // «Мама»: вместо звезды на максимальном ранге P1; чаще, когда
+            // врагов на поле много или жизней мало.
+            (BonusKind::Mama, {
+                let many = self.enemies.iter().filter(|e| e.alive).count() >= 3;
+                (if p1_max { 4 } else { 0 }) + if many { 2 } else { 0 } + if self.lives < 3 { 2 } else { 0 }
+            }),
         ];
         w.retain(|(_, x)| *x > 0);
         let total: u32 = w.iter().map(|(_, x)| x).sum();
@@ -662,6 +683,116 @@ impl Game {
             r -= x;
         }
         BonusKind::Helmet
+    }
+
+    /// Где положить огромную «маму» (3×3 танка). Рядом с сыном, но НЕ на
+    /// нём — иначе он подберёт её в тот же миг и не успеет прочитать:
+    /// край таблички в одном тайле от его танка, со стороны центра поля
+    /// (если там упираемся в край — пробуем другие стороны).
+    /// `fallback` — место обычного бонуса (если сына нет).
+    fn mama_pos(&self, fallback: Vec2) -> Vec2 {
+        let big = self.tank_size * 3.0;
+        let field = vec2(self.map.width as f32, self.map.height as f32) * self.tile_size;
+        let clamp = |p: Vec2| vec2(p.x.clamp(0.0, field.x - big), p.y.clamp(0.0, field.y - big));
+        let Some(son) = self.players.get(1) else {
+            let c = fallback + vec2(self.tank_size, self.tank_size) / 2.0;
+            return clamp(c - vec2(big, big) / 2.0);
+        };
+        let s0 = if son.tank.alive { son.tank.pos } else { son.spawn };
+        let sc = s0 + vec2(self.tank_size, self.tank_size) / 2.0;
+        let gap = big / 2.0 + self.tank_size / 2.0 + self.tile_size;
+        let to_center = field / 2.0 - sc;
+        let mut dirs = vec![
+            vec2(to_center.x.signum(), 0.0),
+            vec2(0.0, to_center.y.signum()),
+            vec2(-to_center.x.signum(), 0.0),
+            vec2(0.0, -to_center.y.signum()),
+        ];
+        if to_center.y.abs() > to_center.x.abs() {
+            dirs.swap(0, 1);
+        }
+        let overlaps_son = |p: Vec2| {
+            p.x < s0.x + self.tank_size && p.x + big > s0.x && p.y < s0.y + self.tank_size && p.y + big > s0.y
+        };
+        for d in dirs {
+            let p = clamp(sc + d * gap - vec2(big, big) / 2.0);
+            if !overlaps_son(p) {
+                return p;
+            }
+        }
+        clamp(sc - vec2(big, big) / 2.0)
+    }
+
+    /// Enter, пока идёт пауза после последнего врага: не ждать —
+    /// сразу экран победы. Возвращает true, если так и сделали.
+    pub fn skip_victory_wait(&mut self) -> bool {
+        if self.state == GameState::Playing && !self.paused && self.victory_timer.is_some() {
+            self.victory_timer = Some(0.0);
+            return true;
+        }
+        false
+    }
+
+    /// Обезьянка: пукает облачками в ближайшего ещё не одурманенного
+    /// врага; облачко летит сквозь стены и навсегда усыпляет первого,
+    /// кого заденет.
+    fn monkey_step(&mut self, dt: f32) {
+        if let Some(m) = &mut self.monkey {
+            m.tick(dt);
+            if m.cooldown <= 0.0 {
+                let target = self
+                    .enemies
+                    .iter()
+                    .filter(|e| e.alive && !e.gassed)
+                    .map(|e| (e.id, e.pos + vec2(e.size, e.size) / 2.0))
+                    .min_by(|a, b| {
+                        (a.1 - m.pos).length().total_cmp(&(b.1 - m.pos).length())
+                    });
+                if let Some((id, t)) = target {
+                    let speed = self.tuning.cloud_speed * self.tile_size;
+                    let cloud = m.shoot(t, id, speed, self.tuning.monkey_fire_interval);
+                    self.clouds.push(cloud);
+                    self.sfx.push(Sfx::Fart);
+                }
+            }
+            if !m.alive() {
+                self.monkey = None;
+            }
+        }
+
+        let field = vec2(self.map.width as f32, self.map.height as f32) * self.tile_size;
+        for c in self.clouds.iter_mut() {
+            // Наведение: за своей целью; если её уже нет или она в дымке —
+            // на ближайшего свободного врага.
+            let free = |e: &&Tank| e.alive && !e.gassed;
+            let aim = c
+                .target
+                .and_then(|id| self.enemies.iter().filter(free).find(|e| e.id == id))
+                .or_else(|| {
+                    self.enemies.iter().filter(free).min_by(|a, b| {
+                        (a.pos - c.pos).length().total_cmp(&(b.pos - c.pos).length())
+                    })
+                })
+                .map(|e| (e.id, e.pos + vec2(e.size, e.size) / 2.0));
+            if let Some((id, to)) = aim {
+                c.target = Some(id);
+                c.steer(to);
+            }
+            c.update(dt);
+            if c.pos.x < -c.radius || c.pos.y < -c.radius || c.pos.x > field.x + c.radius || c.pos.y > field.y + c.radius {
+                c.alive = false;
+            }
+            if !c.alive {
+                continue;
+            }
+            if let Some(e) = self.enemies.iter_mut().find(|e| e.alive && !e.gassed && c.touches(e.pos, e.size)) {
+                e.gassed = true;
+                c.alive = false;
+                let at = e.pos + vec2(e.size, e.size) / 2.0;
+                self.effects.push(Effect::new(at, EffectKind::Gas, self.tank_size));
+            }
+        }
+        self.clouds.retain(|c| c.alive);
     }
 
     /// Ранг 6 — телепорт-защитник. Если вражеская пуля вот-вот попадёт
@@ -845,6 +976,8 @@ impl Game {
                 draw_spawn_star(p.spawn + half, self.tank_size, el, self.tuning.spawn_star_time);
             }
         }
+        for c in self.clouds.iter() { c.draw(); }
+        if let Some(m) = &self.monkey { m.draw(); }
         for fx in self.effects.iter() { fx.draw(); }
 
         match self.state {
@@ -927,6 +1060,7 @@ impl Game {
                 level: self.current_level,
                 freeze_timer: self.freeze_timer,
                 shovel_timer: self.shovel_timer,
+                mama_timer: self.monkey.as_ref().map_or(0.0, |m| m.time_left),
             },
         );
 

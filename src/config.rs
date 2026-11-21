@@ -124,6 +124,12 @@ pub struct Gameplay {
     pub armor_hit_shield: f32,
     /// Перезарядка телепорта-защитника (ранг 6).
     pub guardian_cooldown: f32,
+    /// Сколько секунд действует бонус «мама» (обезьянка стреляет облачками).
+    pub mama_time: f32,
+    /// Как часто обезьянка выпускает облачко, секунд.
+    pub monkey_fire_interval: f32,
+    /// Скорость облачка, тайлов в секунду.
+    pub cloud_speed: f32,
     /// Скорость врагов относительно tank_speed (у быстрых — ещё ×2).
     pub enemy_speed_mult: f32,
     /// Скорость вражеских пуль относительно bullet_speed.
@@ -152,6 +158,9 @@ impl Default for Gameplay {
             sand_speed_mult: 0.5,
             armor_hit_shield: 1.0,
             guardian_cooldown: 5.0,
+            mama_time: 10.0,
+            monkey_fire_interval: 0.6,
+            cloud_speed: 7.0,
             enemy_speed_mult: 0.75,
             enemy_bullet_speed_mult: 0.75,
             extra_life_every: 20_000,

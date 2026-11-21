@@ -50,6 +50,14 @@ impl Game {
                 self.players[pi].give_shield(tuning.helmet_shield);
                 println!("Helmet picked! Shield for {}s", tuning.helmet_shield);
             }
+            BonusKind::Mama => {
+                // Обезьянка садится левее точки появления P1.
+                let p1 = self.players[0].spawn;
+                let pos = p1 + macroquad::prelude::vec2(-self.tile_size * 1.5, self.tank_size / 2.0);
+                let time = tuning.mama_time;
+                self.monkey = Some(crate::entities::monkey::Monkey::new(pos, self.tank_size, time));
+                println!("Mama picked! Monkey for {time}s");
+            }
             BonusKind::Shovel => {
                 // Если лопата уже активна — снимаем старую, потом ставим новую.
                 if self.shovel_timer > 0.0 {

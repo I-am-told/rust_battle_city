@@ -142,7 +142,13 @@ async fn main() {
                         GameState::Defeat => {
                             next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path, hiscore, difficulty)));
                         }
-                        GameState::Playing => game.toggle_pause(),
+                        // Пауза после последнего врага — Enter её пропускает
+                        // (сразу экран победы); иначе Enter — пауза.
+                        GameState::Playing => {
+                            if !game.skip_victory_wait() {
+                                game.toggle_pause();
+                            }
+                        }
                     }
                 }
                 game.update(dt);

@@ -85,6 +85,8 @@ pub struct PanelInfo<'a> {
     pub level: u32,
     pub freeze_timer: f32,
     pub shovel_timer: f32,
+    /// Сколько ещё действует «мама» (обезьянка).
+    pub mama_timer: f32,
 }
 
 /// Боковая панель справа от поля. Рисовать в камере `game_camera`.
@@ -128,6 +130,16 @@ pub fn draw_panel(tile_size: f32, grid_w: i32, grid_h: i32, info: &PanelInfo) {
             ty,
             ts * 1.1,
             DARKBLUE,
+        );
+        ty += ts;
+    }
+    if info.mama_timer > 0.0 {
+        draw_text(
+            format!("M {:.0}", info.mama_timer.ceil()),
+            x0 + ts * 1.0,
+            ty,
+            ts * 1.1,
+            Color::new(0.75, 0.15, 0.45, 1.0),
         );
         ty += ts;
     }

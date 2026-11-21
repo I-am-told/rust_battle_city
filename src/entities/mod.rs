@@ -6,3 +6,4 @@ pub mod bullet;
 pub mod spawner;
 pub mod bonus;
 pub mod effects;
+pub mod monkey;
