@@ -42,6 +42,12 @@ pub enum Sfx {
     Teleport,
     /// Обезьянка пукает (бонус «мама»).
     Fart,
+    /// Русалка брызгает водой.
+    Splash,
+    /// Фея колдует.
+    Magic,
+    /// Щенок лает.
+    Bark,
 }
 
 const RATE: u32 = 22_050;
@@ -220,6 +226,28 @@ fn samples(s: Sfx) -> Vec<f32> {
             },
             tones(&[t(Noise, 400.0, 150.0, 0.38, 0.25, 0.8)]),
         ),
+        // Брызги: «плюх» вниз шумом, «бульк» и пара пузырьков.
+        Sfx::Splash => mix(
+            tones(&[t(Noise, 6000.0, 900.0, 0.3, 0.35, 1.3)]),
+            tones(&[
+                t(Triangle, 700.0, 180.0, 0.09, 0.45, 0.8),
+                t(Triangle, 900.0, 1500.0, 0.04, 0.2, 0.5),
+                t(Triangle, 1100.0, 1800.0, 0.04, 0.15, 0.5),
+            ]),
+        ),
+        // Волшебство: быстрое звонкое арпеджио вверх и «дзынь».
+        Sfx::Magic => mix(
+            tones(&melody(&[(C6, 0.04), (E6, 0.04), (G6, 0.04), (C7, 0.04), (E6, 0.04), (G6, 0.04), (C7, 0.12)], 0.125, 0.14)),
+            tones(&[t(Triangle, 2637.0, 2637.0, 0.4, 0.15, 1.5)]),
+        ),
+        // Гав: короткий рык вверх, потом вниз — квадрат + шум.
+        Sfx::Bark => mix(
+            tones(&[
+                t(Square(0.4), 330.0, 560.0, 0.035, 0.4, 0.0),
+                t(Square(0.4), 560.0, 240.0, 0.13, 0.4, 1.2),
+            ]),
+            tones(&[t(Noise, 1800.0, 700.0, 0.16, 0.22, 1.0)]),
+        ),
         // Грустный спуск.
         Sfx::GameOver => mix(
             tones(&melody(&[(G5, 0.22), (E5, 0.22), (D5, 0.22), (C5, 0.6)], 0.5, 0.22)),
@@ -269,11 +297,11 @@ pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
     b
 }
 
-pub const ALL_SFX: [Sfx; 15] = [
+pub const ALL_SFX: [Sfx; 18] = [
     Sfx::Shot, Sfx::HitBrick, Sfx::HitSteel, Sfx::HitArmor, Sfx::EnemyBoom,
     Sfx::PlayerBoom, Sfx::BaseBoom, Sfx::BonusAppear, Sfx::BonusPickup,
     Sfx::LifeUp, Sfx::Pause, Sfx::LevelStart, Sfx::GameOver, Sfx::Teleport,
-    Sfx::Fart,
+    Sfx::Fart, Sfx::Splash, Sfx::Magic, Sfx::Bark,
 ];
 
 // ---------- воспроизведение ----------

@@ -1,4 +1,5 @@
 use macroquad::prelude::KeyCode;
+use crate::entities::monkey::HelperKind;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -130,6 +131,11 @@ pub struct Gameplay {
     pub monkey_fire_interval: f32,
     /// Скорость облачка, тайлов в секунду.
     pub cloud_speed: f32,
+    /// Помощник из бонуса «мама» (обезьянка, русалка, фея, щенок — кого
+    /// выбрали в меню): сколько секунд летает, как часто стреляет и как
+    /// быстро летят его снаряды (тайлов в секунду) — см. mama_time,
+    /// monkey_fire_interval, cloud_speed; облёт сына — monkey_orbit_*.
+    ///
     /// Насколько «умны» враги со второго круга карт: шанс, что враг поедет
     /// к цели (игрок/штаб) и развернётся к ней, если она на одной линии.
     /// 0 — враги всегда ездят случайно; 1 — всегда к цели.
@@ -518,5 +524,63 @@ pub fn load_difficulty(path: &Path) -> Difficulty {
 pub fn save_difficulty(path: &Path, d: Difficulty) {
     if let Err(e) = fs::write(path, format!("{}\n", d.label().to_lowercase())) {
         eprintln!("Не удалось сохранить сложность в {}: {e}", path.display());
+    }
+}
+
+/// Помощник из бонуса «мама» — выбирается в меню и запоминается в helper.txt.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HelperChoice {
+    /// Каждый раз — случайный из четырёх (по умолчанию).
+    Random,
+    Fixed(HelperKind),
+}
+
+impl HelperChoice {
+    /// Порядок в меню (влево/вправо, по кругу).
+    const ORDER: [HelperChoice; 5] = [
+        HelperChoice::Random,
+        HelperChoice::Fixed(HelperKind::Monkey),
+        HelperChoice::Fixed(HelperKind::Mermaid),
+        HelperChoice::Fixed(HelperKind::Fairy),
+        HelperChoice::Fixed(HelperKind::Puppy),
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            HelperChoice::Random => "RANDOM",
+            HelperChoice::Fixed(k) => k.label(),
+        }
+    }
+
+    /// Следующий (`delta` = 1) или предыдущий (-1) вариант.
+    pub fn step(self, delta: i32) -> Self {
+        let n = Self::ORDER.len() as i32;
+        let i = Self::ORDER.iter().position(|c| *c == self).unwrap_or(0) as i32;
+        Self::ORDER[(i + delta).rem_euclid(n) as usize]
+    }
+
+    /// Кто прилетит сейчас.
+    pub fn pick(self) -> HelperKind {
+        match self {
+            HelperChoice::Random => HelperKind::ALL[macroquad::rand::gen_range(0, HelperKind::ALL.len())],
+            HelperChoice::Fixed(k) => k,
+        }
+    }
+}
+
+pub fn helper_path(dir: &Path) -> PathBuf {
+    let p = dir.join("helper.txt");
+    p.strip_prefix(".").map(|x| x.to_path_buf()).unwrap_or(p)
+}
+
+/// Помощник из файла; нет файла или непонятное значение — случайный.
+pub fn load_helper(path: &Path) -> HelperChoice {
+    let t = fs::read_to_string(path).map(|t| t.trim().to_uppercase()).unwrap_or_default();
+    HelperChoice::ORDER.into_iter().find(|c| c.label() == t).unwrap_or(HelperChoice::Random)
+}
+
+pub fn save_helper(path: &Path, h: HelperChoice) {
+    if let Err(e) = fs::write(path, format!("{}\n", h.label().to_lowercase())) {
+        eprintln!("Не удалось сохранить помощника в {}: {e}", path.display());
     }
 }

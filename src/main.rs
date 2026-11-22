@@ -17,6 +17,7 @@ use input::{any_down, any_pressed, warn_conflicts, KeyBindings, SystemBindings};
 use config::{
     config_dir, difficulty_path, hiscore_path, keys_file_path, load_difficulty, load_hiscore,
     load_keys_file, load_stage, save_difficulty, save_hiscore, save_stage, stage_path, PlayerKeys,
+    helper_path, load_helper, save_helper,
 };
 use menu::{Menu, MenuAction};
 use std::rc::Rc;
@@ -84,7 +85,11 @@ async fn main() {
         levels::load_levels(&config_dir().join("levels"), cfg.grid_width, cfg.grid_height).maps.len() as u32
     };
 
-    let mut screen = Screen::Menu(Menu::new(0, &keys_path, hiscore, difficulty, stage, map_count()));
+    // Помощник из бонуса «мама» (по умолчанию случайный) — в helper.txt.
+    let helper_file = helper_path(&config_dir());
+    let mut helper = load_helper(&helper_file);
+
+    let mut screen = Screen::Menu(Menu::new(0, &keys_path, hiscore, difficulty, stage, map_count(), helper));
     // Последний выбор в меню (после GAME OVER курсор стоит на нём).
     let mut last_menu_choice: usize = 0;
     // Сколько секунд удерживается клавиша выхода.
@@ -119,6 +124,10 @@ async fn main() {
             Screen::Menu(menu) => {
                 let action = menu.update(&mut all_keys, &base_keys, &sys);
                 // Сложность переключили в меню — запомнить.
+                if menu.helper != helper {
+                    helper = menu.helper;
+                    save_helper(&helper_file, helper);
+                }
                 if menu.difficulty != difficulty {
                     difficulty = menu.difficulty;
                     save_difficulty(&difficulty_file, difficulty);
@@ -135,7 +144,7 @@ async fn main() {
                         cfg.grid_width,
                         cfg.grid_height,
                     );
-                    next = Some(Screen::Game(Box::new(Game::new_at(&cfg, keys, Rc::new(lv), hiscore, difficulty, stage))));
+                    next = Some(Screen::Game(Box::new(Game::new_at(&cfg, keys, Rc::new(lv), hiscore, difficulty, helper, stage))));
                 }
                 audio.set_engine(false);
                 menu.draw(&all_keys);
@@ -150,7 +159,7 @@ async fn main() {
                     match game.state {
                         GameState::Victory => game.advance_level(&cfg),
                         GameState::Defeat => {
-                            next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path, hiscore, difficulty, stage, map_count())));
+                            next = Some(Screen::Menu(Menu::new(last_menu_choice, &keys_path, hiscore, difficulty, stage, map_count(), helper)));
                         }
                         // Пауза после последнего врага — Enter её пропускает
                         // (сразу экран победы); иначе Enter — пауза.

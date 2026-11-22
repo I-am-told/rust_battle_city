@@ -59,13 +59,14 @@ impl Game {
                 println!("Helmet picked! Shield for {}s", tuning.helmet_shield);
             }
             BonusKind::Mama => {
-                // Обезьянка садится левее точки появления P1.
-                // Появляется слева от сына и сразу начинает облетать его.
+                // Помощник (кого выбрали в меню или случайный) появляется
+                // слева от сына и сразу начинает облетать его.
                 let pos = self.guarded_center().unwrap_or_default()
                     - macroquad::prelude::vec2(tuning.monkey_orbit_radius * self.tank_size, 0.0);
                 let time = tuning.mama_time;
-                self.monkey = Some(crate::entities::monkey::Monkey::new(pos, self.tank_size, time));
-                println!("Mama picked! Monkey for {time}s");
+                let kind = self.helper.pick();
+                self.monkey = Some(crate::entities::monkey::Monkey::new(kind, pos, self.tank_size, time));
+                println!("Mama picked! {} for {time}s", kind.label());
             }
             BonusKind::Shovel => {
                 // Если лопата уже активна — снимаем старую, потом ставим новую.

@@ -14,8 +14,8 @@ pub enum EffectKind {
     Points(u32),
     /// Вспышка телепорта (ранг 6): золотые кольца, ~0.35 с.
     Teleport,
-    /// Облачко накрыло врага: зелёный клуб, ~0.5 с.
-    Gas,
+    /// Снаряд помощника накрыл врага: клуб цвета помощника, ~0.5 с.
+    Gas(Color),
 }
 
 pub struct Effect {
@@ -38,7 +38,7 @@ impl Effect {
             EffectKind::Big => 0.5,
             EffectKind::Points(_) => 0.8,
             EffectKind::Teleport => 0.35,
-            EffectKind::Gas => 0.5,
+            EffectKind::Gas(_) => 0.5,
         };
         Self {
             center,
@@ -80,12 +80,12 @@ impl Effect {
                     draw_circle(p.x, p.y, self.size * 0.05, Color::new(1.0, 1.0, 0.7, 1.0 - k));
                 }
             }
-            EffectKind::Gas => {
+            EffectKind::Gas(tint) => {
                 let a = 0.8 * (1.0 - k);
                 for i in 0..6 {
                     let ang = i as f32 * std::f32::consts::TAU / 6.0;
                     let p = self.center + vec2(ang.cos(), ang.sin()) * self.size * 0.35 * (0.5 + k);
-                    draw_circle(p.x, p.y, self.size * 0.25, Color::new(0.55, 0.85, 0.45, a));
+                    draw_circle(p.x, p.y, self.size * 0.25, Color { a, ..tint });
                 }
             }
             EffectKind::Points(p) => {

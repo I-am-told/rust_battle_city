@@ -8,7 +8,7 @@ use crate::entities::bullet::{Bullet, BulletHit, BulletSpec};
 use crate::map::WallHit;
 use crate::sound::Sfx;
 use crate::entities::spawner::EnemySpawner;
-use crate::config::{Difficulty, Gameplay};
+use crate::config::{Difficulty, Gameplay, HelperChoice};
 use crate::entities::bonus::{Bonus, BonusKind};
 use crate::entities::effects::{draw_spawn_star, Effect, EffectKind};
 use crate::entities::monkey::{Cloud, Monkey};
@@ -36,6 +36,8 @@ pub struct Progress {
     pub hiscore: u32,
     /// Сложность (переносится между уровнями).
     pub difficulty: Difficulty,
+    /// Помощник из бонуса «мама» (выбран в меню).
+    pub helper: HelperChoice,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -97,6 +99,8 @@ pub struct Game {
     pub tuning: Gameplay,
     /// Сложность.
     pub difficulty: Difficulty,
+    /// Кто прилетает по бонусу «мама» (выбор в меню; Random — каждый раз случайно).
+    pub helper: HelperChoice,
 }
 
 impl Game {
@@ -110,6 +114,7 @@ impl Game {
         levels: Rc<LevelSet>,
         hiscore: u32,
         difficulty: Difficulty,
+        helper: HelperChoice,
         level: u32,
     ) -> Self {
         let n = keys.len();
@@ -121,6 +126,7 @@ impl Game {
             scores: vec![0; n],
             hiscore,
             difficulty,
+            helper,
         };
         Self::new_with_progress(cfg, keys, levels, progress)
     }
@@ -133,7 +139,7 @@ impl Game {
         levels: Rc<LevelSet>,
         progress: Progress,
     ) -> Self {
-        let Progress { level, lives, ranks, scores, hiscore, difficulty } = progress;
+        let Progress { level, lives, ranks, scores, hiscore, difficulty, helper } = progress;
         let layout = levels.layout_for(level);
         let from_file = layout.is_some();
         let mut map = GameMap::with_layout(cfg.grid_width, cfg.grid_height, layout);
@@ -238,6 +244,7 @@ impl Game {
             hiscore,
             tuning: cfg.gameplay,
             difficulty,
+            helper,
         }
     }
 
@@ -603,10 +610,6 @@ impl Game {
                     if son_rules {
                         bonus.kind = self.easy_bonus_kind();
                     }
-                    if bonus.kind == BonusKind::Mama {
-                        bonus.size = self.tank_size * 3.0;
-                        bonus.pos = self.mama_pos(pos);
-                    }
                     self.bonuses.push(bonus);
                     self.sfx.push(Sfx::BonusAppear);
                     forbidden.push(tile);
@@ -741,44 +744,6 @@ impl Game {
         BonusKind::Helmet
     }
 
-    /// Где положить огромную «маму» (3×3 танка). Рядом с сыном, но НЕ на
-    /// нём — иначе он подберёт её в тот же миг и не успеет прочитать:
-    /// край таблички в одном тайле от его танка, со стороны центра поля
-    /// (если там упираемся в край — пробуем другие стороны).
-    /// `fallback` — место обычного бонуса (если сына нет).
-    fn mama_pos(&self, fallback: Vec2) -> Vec2 {
-        let big = self.tank_size * 3.0;
-        let field = vec2(self.map.width as f32, self.map.height as f32) * self.tile_size;
-        let clamp = |p: Vec2| vec2(p.x.clamp(0.0, field.x - big), p.y.clamp(0.0, field.y - big));
-        let Some(son) = self.players.get(1) else {
-            let c = fallback + vec2(self.tank_size, self.tank_size) / 2.0;
-            return clamp(c - vec2(big, big) / 2.0);
-        };
-        let s0 = if son.tank.alive { son.tank.pos } else { son.spawn };
-        let sc = s0 + vec2(self.tank_size, self.tank_size) / 2.0;
-        let gap = big / 2.0 + self.tank_size / 2.0 + self.tile_size;
-        let to_center = field / 2.0 - sc;
-        let mut dirs = vec![
-            vec2(to_center.x.signum(), 0.0),
-            vec2(0.0, to_center.y.signum()),
-            vec2(-to_center.x.signum(), 0.0),
-            vec2(0.0, -to_center.y.signum()),
-        ];
-        if to_center.y.abs() > to_center.x.abs() {
-            dirs.swap(0, 1);
-        }
-        let overlaps_son = |p: Vec2| {
-            p.x < s0.x + self.tank_size && p.x + big > s0.x && p.y < s0.y + self.tank_size && p.y + big > s0.y
-        };
-        for d in dirs {
-            let p = clamp(sc + d * gap - vec2(big, big) / 2.0);
-            if !overlaps_son(p) {
-                return p;
-            }
-        }
-        clamp(sc - vec2(big, big) / 2.0)
-    }
-
     /// Enter, пока идёт пауза после последнего врага: не ждать —
     /// сразу экран победы. Возвращает true, если так и сделали.
     pub fn skip_victory_wait(&mut self) -> bool {
@@ -813,7 +778,7 @@ impl Game {
                     let speed = self.tuning.cloud_speed * self.tile_size;
                     let cloud = m.shoot(t, id, speed, self.tuning.monkey_fire_interval);
                     self.clouds.push(cloud);
-                    self.sfx.push(Sfx::Fart);
+                    self.sfx.push(m.kind.sfx());
                 }
             }
             if !m.alive() {
@@ -848,9 +813,10 @@ impl Game {
             }
             if let Some(e) = self.enemies.iter_mut().find(|e| e.alive && !e.gassed && c.touches(e.pos, e.size)) {
                 e.gassed = true;
+                e.gas_tint = c.kind.haze();
                 c.alive = false;
                 let at = e.pos + vec2(e.size, e.size) / 2.0;
-                self.effects.push(Effect::new(at, EffectKind::Gas, self.tank_size));
+                self.effects.push(Effect::new(at, EffectKind::Gas(c.kind.haze()), self.tank_size));
             }
         }
         self.clouds.retain(|c| c.alive);
@@ -957,6 +923,7 @@ impl Game {
             scores: self.players.iter().map(|p| p.score).collect(),
             hiscore: self.hiscore,
             difficulty: self.difficulty,
+            helper: self.helper,
         };
         let keys: Vec<KeyBindings> = self.players.iter().map(|p| p.keys.clone()).collect();
         let levels = self.levels.clone();

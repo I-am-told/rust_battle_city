@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 use macroquad::prelude::*;
 use crate::ui_text::{draw_text, measure_text};
-use crate::config::Difficulty;
+use crate::config::{Difficulty, HelperChoice};
+use crate::entities::monkey::{HelperKind, Monkey};
 use crate::controls::{ControlsResult, ControlsScreen};
 use crate::input::{any_pressed, KeyBindings, SystemBindings};
 
@@ -12,10 +13,11 @@ pub enum MenuAction {
 }
 
 /// Пункты меню (в порядке отображения).
-const ITEMS: [&str; 5] = ["1 PLAYER", "2 PLAYERS", "MODE", "STAGE", "CONTROLS"];
+const ITEMS: [&str; 6] = ["1 PLAYER", "2 PLAYERS", "MODE", "STAGE", "HELPER", "CONTROLS"];
 const ITEM_MODE: usize = 2;
 const ITEM_STAGE: usize = 3;
-const ITEM_CONTROLS: usize = 4;
+const ITEM_HELPER: usize = 4;
+const ITEM_CONTROLS: usize = 5;
 
 /// Титульный экран: выбор числа игроков, как в оригинале,
 /// и переход к настройке клавиш.
@@ -31,11 +33,13 @@ pub struct Menu {
     pub stage: u32,
     /// Сколько карт в папке levels (0 — встроенная тестовая).
     maps: u32,
+    /// Помощник из бонуса «мама» (пункт HELPER).
+    pub helper: HelperChoice,
 }
 
 impl Menu {
-    pub fn new(selected: usize, keys_path: &Path, hiscore: u32, difficulty: Difficulty, stage: u32, maps: u32) -> Self {
-        let mut m = Self { selected, controls: None, keys_path: keys_path.to_path_buf(), hiscore, difficulty, stage, maps };
+    pub fn new(selected: usize, keys_path: &Path, hiscore: u32, difficulty: Difficulty, stage: u32, maps: u32, helper: HelperChoice) -> Self {
+        let mut m = Self { selected, controls: None, keys_path: keys_path.to_path_buf(), hiscore, difficulty, stage, maps, helper };
         m.stage = stage.clamp(1, m.max_stage());
         m
     }
@@ -93,6 +97,11 @@ impl Menu {
             if left { self.change_stage(-1); }
             if right { self.change_stage(1); }
         }
+        // HELPER: влево/вправо — кто прилетает по бонусу «мама».
+        if self.selected == ITEM_HELPER {
+            if left { self.helper = self.helper.step(-1); }
+            if right { self.helper = self.helper.step(1); }
+        }
         if any_pressed(&sys.start) || players.iter().any(|k| k.fire_pressed()) {
             if self.selected == ITEM_MODE {
                 self.difficulty = self.difficulty.toggled();
@@ -100,6 +109,10 @@ impl Menu {
             }
             if self.selected == ITEM_STAGE {
                 self.change_stage(1);
+                return None;
+            }
+            if self.selected == ITEM_HELPER {
+                self.helper = self.helper.step(1);
                 return None;
             }
             if self.selected == ITEM_CONTROLS {
@@ -129,8 +142,8 @@ impl Menu {
         center_text("BATTLE CITY", h * 0.28, 72.0, ORANGE);
 
         let item_size = 40.0;
-        let first_y = h * 0.48;
-        let step = 56.0;
+        let first_y = h * 0.44;
+        let step = 50.0;
         for (i, item) in ITEMS.iter().enumerate() {
             let y = first_y + i as f32 * step;
             if i == ITEM_MODE {
@@ -142,13 +155,24 @@ impl Menu {
                 if self.stage_is_smart() {
                     center_text("SMART ENEMIES", y + 20.0, 16.0, ORANGE);
                 }
+            } else if i == ITEM_HELPER {
+                let text = format!("HELPER: {}", self.helper.label());
+                center_text(&text, y, item_size, PINK);
+                // Картинка помощника справа; у RANDOM — все по очереди.
+                let kind = match self.helper {
+                    HelperChoice::Fixed(k) => k,
+                    HelperChoice::Random => HelperKind::ALL[(get_time() / 0.7) as usize % HelperKind::ALL.len()],
+                };
+                let dims = measure_text(&text, None, item_size as u16, 1.0);
+                let icon = 44.0;
+                Monkey::new(kind, vec2(w / 2.0 + dims.width / 2.0 + icon * 0.9, y - icon * 0.35), icon, 1.0).draw();
             } else {
                 center_text(item, y, item_size, WHITE);
             }
             if i == self.selected {
                 // Курсор — маленький танк слева от пункта.
                 // По самой широкой надписи — чтобы курсор не наезжал на текст.
-                let dims = measure_text("STAGE < 30 >", None, item_size as u16, 1.0);
+                let dims = measure_text("HELPER: MERMAID", None, item_size as u16, 1.0);
                 let s = 28.0;
                 let x = w / 2.0 - dims.width / 2.0 - s - 24.0;
                 let ty = y - s + 4.0;

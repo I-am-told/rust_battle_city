@@ -397,7 +397,7 @@ impl Tank {
         draw_circle(bx, by, self.size * 0.07, light);
     }
 
-    /// Зелёная дымка вокруг врага, попавшего под облачко «мамы».
+    /// Дымка вокруг врага, которого «усыпил» помощник (цвет — помощника).
     fn draw_gas(&self) {
         let c = self.pos + vec2(self.size, self.size) / 2.0;
         let t = get_time() as f32;
@@ -405,9 +405,11 @@ impl Tank {
             let a = i as f32 * std::f32::consts::TAU / 7.0 + t * 0.7;
             let d = self.size * (0.32 + 0.06 * (t * 2.0 + i as f32).sin());
             let p = c + vec2(a.cos(), a.sin()) * d;
-            draw_circle(p.x, p.y, self.size * 0.24, Color::new(0.55, 0.85, 0.45, 0.35));
+            draw_circle(p.x, p.y, self.size * 0.24, Color { a: 0.35, ..self.gas_tint });
         }
-        draw_circle(c.x, c.y, self.size * 0.4, Color::new(0.8, 1.0, 0.75, 0.25));
+        let g = self.gas_tint;
+        let light = Color::new(g.r + (1.0 - g.r) * 0.6, g.g + (1.0 - g.g) * 0.6, g.b + (1.0 - g.b) * 0.6, 0.25);
+        draw_circle(c.x, c.y, self.size * 0.4, light);
     }
 
     /// Защитное поле после появления: мерцающее кольцо с искрами.

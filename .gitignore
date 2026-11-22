@@ -10,3 +10,5 @@ hiscore.txt
 difficulty.txt
 # Уровень, на котором остановились (локальный)
 stage.txt
+# Выбранный помощник (локальный)
+helper.txt
