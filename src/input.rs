@@ -41,7 +41,7 @@ impl KeyBindings {
         }
     }
 
-    fn keys_for(&self, d: Direction) -> &[KeyCode] {
+    pub fn keys_for(&self, d: Direction) -> &[KeyCode] {
         match d {
             Direction::Up => &self.up,
             Direction::Down => &self.down,

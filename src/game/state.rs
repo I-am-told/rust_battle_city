@@ -101,6 +101,8 @@ pub struct Game {
     pub difficulty: Difficulty,
     /// Кто прилетает по бонусу «мама» (выбор в меню; Random — каждый раз случайно).
     pub helper: HelperChoice,
+    /// «Чёрный ящик»: последние кадры для дампа по F12 (см. debug.rs).
+    pub blackbox: super::debug::BlackBox,
 }
 
 impl Game {
@@ -245,6 +247,7 @@ impl Game {
             tuning: cfg.gameplay,
             difficulty,
             helper,
+            blackbox: Default::default(),
         }
     }
 
@@ -384,9 +387,14 @@ impl Game {
         let mut snapshot = self.all_tanks();
         snapshot.extend(self.star_obstacles());
 
-        for (i, p) in self.players.iter_mut().enumerate() {
+        self.blackbox.next_frame();
+        for i in 0..np {
+            let p = &mut self.players[i];
             let desired = p.dir_input.update(&p.keys);
+            let before = p.tank.pos;
             p.tank.update(dt, desired, &self.map, &snapshot, self.tile_size);
+            self.trace_player(i, desired, before);
+            let p = &mut self.players[i];
             snapshot[i].pos = p.tank.pos;
             snapshot[i].direction = p.tank.direction;
 

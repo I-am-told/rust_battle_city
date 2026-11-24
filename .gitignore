@@ -12,3 +12,5 @@ difficulty.txt
 stage.txt
 # Выбранный помощник (локальный)
 helper.txt
+# «Чёрный ящик» по F12 (для разбора багов)
+debug_*.txt

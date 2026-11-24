@@ -176,6 +176,12 @@ async fn main() {
                     stage = game.current_level;
                     save_stage(&stage_file, stage);
                 }
+                // F12 — «чёрный ящик»: сохранить состояние и последние 3 секунды
+                // в debug_<время>.txt рядом с config.ron (для разбора редких багов).
+                if is_key_pressed(KeyCode::F12) {
+                    game.save_debug_dump(&config_dir());
+                }
+                game.blackbox.tick(dt);
                 game.update(dt);
                 // Звуки за кадр: одинаковые не дублируем (три взрыва
                 // в одном кадре — один звук, а не втрое громче).
@@ -194,6 +200,7 @@ async fn main() {
                     save_hiscore(&hiscore_file, hiscore);
                 }
                 game.draw();
+                game.blackbox.draw_note();
                 draw_quit_hint(game.paused, &sys, quit_held);
             }
         }
