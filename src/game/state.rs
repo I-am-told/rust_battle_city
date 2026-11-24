@@ -101,8 +101,10 @@ pub struct Game {
     pub difficulty: Difficulty,
     /// Кто прилетает по бонусу «мама» (выбор в меню; Random — каждый раз случайно).
     pub helper: HelperChoice,
-    /// «Чёрный ящик»: последние кадры для дампа по Win+P (см. debug.rs).
+    /// «Чёрный ящик»: последние кадры для дампа по Ctrl+I (см. debug.rs).
     pub blackbox: super::debug::BlackBox,
+    /// Идущий телепорт с порталами (игра в это время замедлена; см. portal.rs).
+    pub portal: Option<super::portal::PortalJump>,
 }
 
 impl Game {
@@ -248,6 +250,7 @@ impl Game {
             difficulty,
             helper,
             blackbox: Default::default(),
+            portal: None,
         }
     }
 
@@ -255,6 +258,8 @@ impl Game {
         if self.paused {
             return;
         }
+        // Во время телепорта всё, кроме самой анимации порталов, замедлено.
+        let dt = dt * self.portal_tick(dt);
         // Взрывы доигрываются и после GAME OVER / победы.
         self.effects.retain_mut(|e| e.update(dt));
         if self.state != GameState::Playing {
@@ -389,6 +394,10 @@ impl Game {
 
         self.blackbox.next_frame();
         for i in 0..np {
+            // Танк в портале не ездит и не стреляет.
+            if self.in_portal(i) {
+                continue;
+            }
             let p = &mut self.players[i];
             let desired = p.dir_input.update(&p.keys);
             let before = p.tank.pos;
@@ -838,6 +847,10 @@ impl Game {
     /// со стороны пули, стволом к врагу, и принимает удар на себя
     /// (на броню, если она есть). Потом — перезарядка guardian_cooldown.
     fn guardian_step(&mut self) {
+        // Один телепорт за раз.
+        if self.portal.is_some() {
+            return;
+        }
         // В игре на одного напарника нет — телепорт прикрывает штаб.
         if self.players.len() < 2 {
             self.base_guard_step();
@@ -914,8 +927,7 @@ impl Game {
         g.tank.ice_glide = 0.0;
         g.tank.direction = face;
         g.guard_cooldown = self.tuning.guardian_cooldown;
-        self.effects.push(Effect::new(from, EffectKind::Teleport, size));
-        self.effects.push(Effect::new(spot + half, EffectKind::Teleport, size));
+        self.start_portal(gi, from, spot + half);
         self.sfx.push(Sfx::Teleport);
     }
 
@@ -1099,13 +1111,19 @@ impl Game {
         self.map.draw(self.tile_size);
         for b in self.bullets.iter() { b.draw(); }
         for e in self.enemies.iter() { e.draw(); }
-        for p in self.players.iter() { p.tank.draw(); }
+        for (i, p) in self.players.iter().enumerate() {
+            if !self.in_portal(i) {
+                p.tank.draw();
+            }
+        }
         // Лес поверх танков и пуль (как в оригинале), бонусы — поверх леса.
         self.map.draw_forest(self.tile_size);
         // Лёгкий режим: танк сына (P2) виден и в лесу.
         if self.son_rules() {
-            for p in self.players.iter().filter(|p| p.tank.player_slot == 1) {
-                p.tank.draw();
+            for (i, p) in self.players.iter().enumerate() {
+                if p.tank.player_slot == 1 && !self.in_portal(i) {
+                    p.tank.draw();
+                }
             }
         }
         for b in self.bonuses.iter() { b.draw(); }
@@ -1122,6 +1140,7 @@ impl Game {
         for c in self.clouds.iter() { c.draw(); }
         if let Some(m) = &self.monkey { m.draw(); }
         for fx in self.effects.iter() { fx.draw(); }
+        self.draw_portal_jump();
 
         match self.state {
             GameState::Victory => self.draw_tally(playfield_w, playfield_h),
