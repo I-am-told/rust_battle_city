@@ -29,6 +29,8 @@ pub struct Bullet {
     pub owner_team: Team,
     pub alive: bool,
     pub pierces_steel: bool,
+    /// Бронебойная (8 ранг игрока, каждая вторая): снимает две «жизни».
+    pub heavy: bool,
     /// Во что попала (когда alive стал false).
     pub hit: Option<BulletHit>,
 }
@@ -51,6 +53,7 @@ impl Bullet {
             owner_team,
             alive: true,
             pierces_steel: false,
+            heavy: false,
             hit: None,
         }
     }
@@ -167,6 +170,8 @@ impl Bullet {
     pub fn draw(&self) {
         if !self.alive { return; }
         let (body, tip) = match self.owner_team {
+            // Бронебойная — красная с серебряным наконечником.
+            Team::Player if self.heavy => (Color::new(0.95, 0.2, 0.15, 1.0), Color::new(0.85, 0.9, 1.0, 1.0)),
             Team::Player => (Color::new(1.0, 0.85, 0.2, 1.0), Color::new(1.0, 1.0, 0.85, 1.0)),
             Team::Enemy  => (Color::new(0.75, 0.75, 0.8, 1.0), Color::new(1.0, 1.0, 1.0, 1.0)),
         };

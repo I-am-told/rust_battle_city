@@ -54,6 +54,8 @@ pub struct Tank {
     pub is_bonus: bool,
     pub frozen: bool,
     pub rank: u8,
+    /// Сколько выстрелов сделал (для бронебойной каждой второй пули на 8 ранге).
+    pub shots: u32,
     pub bullet_speed_multiplier: f32,
     pub kind: Option<EnemyKind>,
     pub hp: u8,
@@ -92,6 +94,9 @@ pub struct Tank {
 
 /// Цель «умного» врага (со второго круга карт): куда стремиться и
 /// насколько упорно (0 — как обычный, 1 — всегда к цели).
+/// Максимальный ранг игрока (сколько звёзд можно собрать).
+pub const MAX_RANK: u8 = 8;
+
 #[derive(Clone, Copy, Debug)]
 pub struct AiGoal {
     /// Центр цели в пикселях (игрок или штаб).
@@ -117,6 +122,7 @@ impl Tank {
             is_bonus: false,
             frozen: false,
             rank: 0,
+            shots: 0,
             bullet_speed_multiplier: 1.0,
             kind: None,
             hp: 1,
@@ -166,9 +172,12 @@ impl Tank {
     /// 0 — одна пуля; 1 — быстрые пули; 2 — две пули;
     /// 3 — пули пробивают сталь; 4 — всё это и танк быстрее на 30%;
     /// 5 — + дополнительная броня (выдерживает одно попадание);
-    /// 6 — + телепорт-защитник (прикрывает напарника, золотая рамка);
-    /// 7 — + три пули одновременно.
-    /// Звезда на 5–6 ранге чинит броню.
+    /// 6 — + телепорт-защитник (на двоих — прикрывает напарника, на одного —
+    ///     штаб; шестая точка ранга зелёная);
+    /// 7 — + три пули одновременно;
+    /// 8 (максимум) — + каждая вторая пуля бронебойная (снимает две «жизни»
+    ///     у бронированного врага); танк отделан золотом.
+    /// Звезда на 5+ ранге чинит броню.
     pub fn apply_rank(&mut self, rank: u8) {
         self.rank = rank;
         self.armor = if rank >= 5 { 1 } else { 0 };
@@ -584,7 +593,7 @@ impl Tank {
     }
 
     pub fn try_fire(
-        &self,
+        &mut self,
         active_bullets: u8,
         map: &GameMap,
         tile_size: f32,
@@ -627,6 +636,11 @@ impl Tank {
             self.team,
         );
         bullet.pierces_steel = self.pierces_steel;
+        // 8 ранг: каждая вторая пуля бронебойная.
+        if self.team == Team::Player && self.rank >= 8 {
+            self.shots += 1;
+            bullet.heavy = self.shots.is_multiple_of(2);
+        }
         Some(bullet)
     }
 

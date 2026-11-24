@@ -1,7 +1,7 @@
 use macroquad::prelude::*;
 use crate::entities::direction::Direction;
 use crate::entities::enemy_kind::EnemyKind;
-use crate::entities::tank::{Tank, Team};
+use crate::entities::tank::{Tank, Team, MAX_RANK};
 
 /// Рисует фигуры танка в «нормальных» координатах: танк смотрит вверх,
 /// (0,0) — левый верхний угол, (1,1) — правый нижний. Для других
@@ -131,8 +131,8 @@ fn look_for(tank: &Tank) -> Look {
         // 2 — бронеплиты и башня крупнее (две пули);
         // 3 — тяжёлый: шире корпус, толстый ствол (пробивает сталь);
         // 4 — тяжёлый + гоночные полосы и выхлоп (быстрее ездит);
-        // 5–6 — + бронелисты и золотая рамка (рисуются отдельно);
-        // 7 — + три ствола (три пули).
+        // 5 — + бронелисты (рисуются отдельно); 6 — шестая точка ранга зелёная;
+        // 7 — + три ствола (три пули); 8 (максимум) — + золотая отделка.
         None => match tank.rank {
             0 => base,
             1 => Look { barrel_w: 0.13, barrel_tip: 0.0, muzzle: true, ..base },
@@ -175,13 +175,14 @@ impl Tank {
         if self.team == Team::Player && self.armor > 0 {
             self.draw_armor();
         }
-        // Ранг 6: золотая рамка.
-        if self.team == Team::Player && self.rank >= 6 {
-            self.draw_gold_frame();
+        // Максимальный ранг: танк отделан золотом (стволы тоже золотые).
+        let gold = self.team == Team::Player && self.rank >= MAX_RANK;
+        if gold {
+            self.draw_gold_trim();
         }
         // Ранг 7: боковые стволы — поверх бронелистов, чтобы их было видно.
         if look_for(self).triple {
-            self.draw_side_barrels(color);
+            self.draw_side_barrels(if gold { Color::new(0.93, 0.68, 0.12, 1.0) } else { color });
         }
 
         // Маркеры ранга у игрока.
@@ -194,7 +195,9 @@ impl Tank {
             let y = self.pos.y - r * 1.5;
             for i in 0..n {
                 let cx = start_x + i as f32 * (2.0 * r + gap) + r;
-                draw_circle(cx, y, r, WHITE);
+                // Шестая точка (ранг с телепортом) — зелёная, как портал.
+                let c = if i == 5 { Color::new(0.3, 1.0, 0.3, 1.0) } else { WHITE };
+                draw_circle(cx, y, r, c);
             }
         }
 
@@ -372,29 +375,52 @@ impl Tank {
         pen.rect(0.28, 0.13, 0.44, 0.05, steel);
     }
 
-    /// Золотая рамка 6-го ранга: переливается, с ромбиками по углам.
-    fn draw_gold_frame(&self) {
+    /// Золотая отделка максимального ранга: башня, ствол, кромки гусениц
+    /// и заклёпки на корпусе — в золоте, а сам корпус остаётся цвета игрока.
+    /// По танку раз в пару секунд пробегает блик.
+    fn draw_gold_trim(&self) {
+        let pen = Pen { pos: self.pos, size: self.size, dir: self.direction };
+        let look = look_for(self);
         let t = get_time() as f32;
-        let shine = 0.75 + 0.25 * (t * 6.0).sin();
-        let gold = Color::new(1.0 * shine, 0.8 * shine, 0.15, 1.0);
-        let light = Color::new(1.0, 0.97, 0.6, 1.0);
-        let m = self.size * 0.06;
-        let (x, y, s) = (self.pos.x - m, self.pos.y - m, self.size + 2.0 * m);
-        draw_rectangle_lines(x, y, s, s, self.size * 0.07, gold);
-        for (cx, cy) in [(x, y), (x + s, y), (x, y + s), (x + s, y + s)] {
-            let r = self.size * 0.09;
-            draw_triangle(vec2(cx - r, cy), vec2(cx, cy - r), vec2(cx + r, cy), light);
-            draw_triangle(vec2(cx - r, cy), vec2(cx, cy + r), vec2(cx + r, cy), light);
+        let gold = Color::new(0.93, 0.68, 0.12, 1.0);
+        let dark = Color::new(0.6, 0.4, 0.05, 1.0);
+        let light = Color::new(1.0, 0.95, 0.6, 1.0);
+
+        // Кромки гусениц.
+        let tw = look.track_w;
+        for x in [0.0, 1.0 - tw] {
+            pen.rect(x, 0.04, tw, 0.035, gold);
+            pen.rect(x, 0.925, tw, 0.035, gold);
         }
-        // Бегущий блик по рамке.
-        let k = (t * 0.8).fract() * 4.0;
-        let (bx, by) = match k as i32 {
-            0 => (x + s * k.fract(), y),
-            1 => (x + s, y + s * k.fract()),
-            2 => (x + s * (1.0 - k.fract()), y + s),
-            _ => (x, y + s * (1.0 - k.fract())),
-        };
-        draw_circle(bx, by, self.size * 0.07, light);
+        // Заклёпки по углам корпуса.
+        let hx = look.hull_inset;
+        for (x, y) in [(hx + 0.06, 0.22), (1.0 - hx - 0.06, 0.22), (hx + 0.06, 0.82), (1.0 - hx - 0.06, 0.82)] {
+            pen.circle(x, y, 0.035, dark);
+            pen.circle(x - 0.008, y - 0.008, 0.022, light);
+        }
+        // Ствол.
+        let bw = look.barrel_w;
+        let bx = 0.5 - bw / 2.0;
+        pen.rect(bx, look.barrel_tip, bw, 0.5 - look.barrel_tip, dark);
+        pen.rect(bx + bw * 0.2, look.barrel_tip, bw * 0.6, 0.5 - look.barrel_tip, gold);
+        pen.rect(bx + bw * 0.3, look.barrel_tip, bw * 0.2, 0.5 - look.barrel_tip, light);
+        pen.rect(bx - 0.03, look.barrel_tip, bw + 0.06, 0.06, dark);
+        pen.rect(bx - 0.02, look.barrel_tip + 0.01, bw + 0.04, 0.03, gold);
+        // Башня с бегущим по кругу бликом.
+        let r = look.turret_r;
+        pen.circle(0.5, 0.56, r, dark);
+        pen.circle(0.5, 0.56, r * 0.82, gold);
+        let a = t * 2.5;
+        pen.circle(0.5 + a.cos() * r * 0.45, 0.56 + a.sin() * r * 0.45, r * 0.25, light);
+        pen.circle(0.5, 0.56, r * 0.3, dark);
+        // Блик-звёздочка пробегает по диагонали танка.
+        let k = (t * 0.5).fract();
+        if k < 0.35 {
+            let p = self.pos + vec2(k, k) / 0.35 * self.size;
+            let s = self.size * 0.1 * (1.0 - (k / 0.35 - 0.5).abs() * 2.0).max(0.2);
+            draw_line(p.x - s, p.y, p.x + s, p.y, s * 0.3, light);
+            draw_line(p.x, p.y - s, p.x, p.y + s, s * 0.3, light);
+        }
     }
 
     /// Дымка вокруг врага, которого «усыпил» помощник (цвет — помощника).

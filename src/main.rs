@@ -151,11 +151,18 @@ async fn main() {
                 draw_quit_hint(false, &sys, quit_held);
             }
             Screen::Game(game) => {
+                // Win+P — «чёрный ящик»: сохранить состояние и последние секунды
+                // в debug_<время>.txt рядом с config.ron (для разбора редких багов).
+                // Пока зажат Win, P не ставит паузу.
+                let win_held = is_key_down(KeyCode::LeftSuper) || is_key_down(KeyCode::RightSuper);
+                if win_held && is_key_pressed(KeyCode::P) {
+                    game.save_debug_dump(&config_dir());
+                }
                 // Start (по умолчанию Enter или P):
                 // - во время игры — пауза / продолжить (как Start на Dandy)
                 // - Victory → следующий уровень (жизни и ранги сохраняются)
                 // - Defeat → в меню
-                if any_pressed(&sys.start) {
+                if any_pressed(&sys.start) && !win_held {
                     match game.state {
                         GameState::Victory => game.advance_level(&cfg),
                         GameState::Defeat => {
@@ -175,11 +182,6 @@ async fn main() {
                 if game.current_level != stage {
                     stage = game.current_level;
                     save_stage(&stage_file, stage);
-                }
-                // F12 — «чёрный ящик»: сохранить состояние и последние 3 секунды
-                // в debug_<время>.txt рядом с config.ron (для разбора редких багов).
-                if is_key_pressed(KeyCode::F12) {
-                    game.save_debug_dump(&config_dir());
                 }
                 game.blackbox.tick(dt);
                 game.update(dt);

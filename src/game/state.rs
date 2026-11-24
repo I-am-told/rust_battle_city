@@ -21,7 +21,7 @@ use crate::levels::LevelSet;
 use std::rc::Rc;
 
 /// Максимальный ранг игрока (см. Tank::apply_rank).
-pub const MAX_RANK: u8 = 7;
+pub use crate::entities::tank::MAX_RANK;
 
 /// Что переносится между уровнями.
 pub struct Progress {
@@ -101,7 +101,7 @@ pub struct Game {
     pub difficulty: Difficulty,
     /// Кто прилетает по бонусу «мама» (выбор в меню; Random — каждый раз случайно).
     pub helper: HelperChoice,
-    /// «Чёрный ящик»: последние кадры для дампа по F12 (см. debug.rs).
+    /// «Чёрный ящик»: последние кадры для дампа по Win+P (см. debug.rs).
     pub blackbox: super::debug::BlackBox,
 }
 
@@ -497,12 +497,11 @@ impl Game {
 
         // Пули. Игроки в одной команде — пули проходят сквозь напарника.
         let tanks_now = self.all_tanks();
-        // (в кого попали, чья пуля)
-        // (в кого попали, чья пуля, куда летела)
-        let mut hit_ids: Vec<(u32, u32, Direction)> = Vec::new();
+        // (в кого попали, чья пуля, куда летела, бронебойная ли)
+        let mut hit_ids: Vec<(u32, u32, Direction, bool)> = Vec::new();
         for b in self.bullets.iter_mut() {
             if let Some(hit_id) = b.update(dt, &mut self.map, &tanks_now, self.tile_size) {
-                hit_ids.push((hit_id, b.owner_id, b.direction));
+                hit_ids.push((hit_id, b.owner_id, b.direction, b.heavy));
             }
         }
 
@@ -539,7 +538,7 @@ impl Game {
 
         let mut pending_bonuses: u32 = 0;
         let son_rules = self.son_rules();
-        for (id, owner, bullet_dir) in hit_ids {
+        for (id, owner, bullet_dir, heavy) in hit_ids {
             if let Some(p) = self.players.iter_mut().find(|p| p.tank.id == id) {
                 // Лёгкий режим: сына (P2) не убить в спину — пуля летит
                 // туда же, куда смотрит танк, значит попала сзади.
@@ -565,6 +564,10 @@ impl Game {
                 let was_bonus = e.is_bonus;
                 e.is_bonus = false;
                 e.take_hit();
+                // Бронебойная пуля (8 ранг) снимает вторую «жизнь».
+                if heavy {
+                    e.take_hit();
+                }
                 if e.alive {
                     self.sfx.push(Sfx::HitArmor);
                 }
@@ -835,7 +838,9 @@ impl Game {
     /// со стороны пули, стволом к врагу, и принимает удар на себя
     /// (на броню, если она есть). Потом — перезарядка guardian_cooldown.
     fn guardian_step(&mut self) {
+        // В игре на одного напарника нет — телепорт прикрывает штаб.
         if self.players.len() < 2 {
+            self.base_guard_step();
             return;
         }
         let size = self.tank_size;
@@ -892,19 +897,115 @@ impl Game {
                 continue;
             }
 
-            let half = vec2(size, size) / 2.0;
-            let from = self.players[gi].tank.pos + half;
-            let g = &mut self.players[gi];
-            g.tank.pos = spot;
-            g.tank.prev_pos = spot;
-            g.tank.slide_target = None;
-            g.tank.ice_glide = 0.0;
             // Стволом к врагу — навстречу пуле.
-            g.tank.direction = bullet_dir.opposite();
-            g.guard_cooldown = self.tuning.guardian_cooldown;
-            self.effects.push(Effect::new(from, EffectKind::Teleport, size));
-            self.effects.push(Effect::new(spot + half, EffectKind::Teleport, size));
-            self.sfx.push(Sfx::Teleport);
+            self.guard_teleport(gi, spot, bullet_dir.opposite());
+        }
+    }
+
+    /// Перенести игрока `gi` в `spot` (телепорт-защитник), стволом в `face`.
+    fn guard_teleport(&mut self, gi: usize, spot: Vec2, face: Direction) {
+        let size = self.tank_size;
+        let half = vec2(size, size) / 2.0;
+        let from = self.players[gi].tank.pos + half;
+        let g = &mut self.players[gi];
+        g.tank.pos = spot;
+        g.tank.prev_pos = spot;
+        g.tank.slide_target = None;
+        g.tank.ice_glide = 0.0;
+        g.tank.direction = face;
+        g.guard_cooldown = self.tuning.guardian_cooldown;
+        self.effects.push(Effect::new(from, EffectKind::Teleport, size));
+        self.effects.push(Effect::new(spot + half, EffectKind::Teleport, size));
+        self.sfx.push(Sfx::Teleport);
+    }
+
+    /// Игра на одного, ранг 6+: если вражеская пуля вот-вот попадёт в штаб
+    /// (летит в него, и стены на пути уже нет), танк переносится на линию
+    /// огня между пулей и штабом — стволом к пуле — и принимает удар на себя.
+    fn base_guard_step(&mut self) {
+        let Some(origin) = self.map.base_origin else { return };
+        if self.map.base_destroyed {
+            return;
+        }
+        let g = &self.players[0];
+        if !g.tank.alive || g.tank.rank < 6 || g.guard_cooldown > 0.0 {
+            return;
+        }
+        let (ts, size) = (self.tile_size, self.tank_size);
+        let field = vec2(self.map.width as f32, self.map.height as f32) * ts;
+        let e0 = origin.as_vec2() * ts;
+        let e1 = e0 + vec2(2.0 * ts, 2.0 * ts);
+        let eagle_center = (e0 + e1) / 2.0;
+        // Как далеко вперёд смотреть: три танка пути пули.
+        let look = size * 3.0;
+        let inside_eagle = |p: Vec2| p.x >= e0.x && p.x <= e1.x && p.y >= e0.y && p.y <= e1.y;
+
+        for b in self.bullets.iter().filter(|b| b.alive && b.owner_team == Team::Enemy) {
+            let d = b.direction.vector().as_vec2();
+            let bc = b.pos + vec2(b.size, b.size) / 2.0;
+            // Траектория на `look` вперёд задевает штаб?
+            let (a, e) = (b.pos, b.pos + d * look);
+            let (lo, hi) = (a.min(e), a.max(e) + vec2(b.size, b.size));
+            if !(lo.x < e1.x && hi.x > e0.x && lo.y < e1.y && hi.y > e0.y) {
+                continue;
+            }
+            // Стена (кирпич/сталь) на пути ещё есть — её и так пуля заденет.
+            let step = ts / 4.0;
+            let mut p = bc;
+            let mut walled = false;
+            for _ in 0..((look / step) as i32 + 1) {
+                if inside_eagle(p) {
+                    break;
+                }
+                if self.map.rect_blocked(p - vec2(0.5, 0.5), vec2(1.0, 1.0), ts, true) {
+                    walled = true;
+                    break;
+                }
+                p += d * step;
+            }
+            if walled {
+                continue;
+            }
+            // Место: на линии пули, между ней и штабом — от штаба к пуле
+            // с шагом в полтайла, первое свободное.
+            let u = -d;
+            let lateral = |c: Vec2| {
+                // Поперёк полёта — выровнять по сетке так, чтобы танк накрыл пулю.
+                let v = if d.x != 0.0 { bc.y } else { bc.x };
+                let snapped = ((v - size / 2.0) / ts).round() * ts;
+                let snapped = snapped.clamp(v - size + b.size, v - b.size);
+                if d.x != 0.0 { vec2(c.x - size / 2.0, snapped) } else { vec2(snapped, c.y - size / 2.0) }
+            };
+            let mut found = None;
+            for k in 0..16 {
+                let center = eagle_center + u * (ts + size / 2.0 + k as f32 * ts / 2.0);
+                // Пуля должна быть ещё впереди танка.
+                if (bc - center).dot(u) <= size / 2.0 + b.size {
+                    break;
+                }
+                let spot = lateral(center);
+                if spot.x < 0.0 || spot.y < 0.0 || spot.x + size > field.x || spot.y + size > field.y {
+                    continue;
+                }
+                if self.map.rect_blocked(spot, vec2(size, size), ts, false) {
+                    continue;
+                }
+                let g_id = self.players[0].tank.id;
+                let overlaps = |t: &Tank| {
+                    t.alive && t.id != g_id
+                        && spot.x < t.pos.x + t.size - 0.01 && spot.x + size > t.pos.x + 0.01
+                        && spot.y < t.pos.y + t.size - 0.01 && spot.y + size > t.pos.y + 0.01
+                };
+                if self.enemies.iter().any(overlaps) {
+                    continue;
+                }
+                found = Some((spot, b.direction.opposite()));
+                break;
+            }
+            if let Some((spot, face)) = found {
+                self.guard_teleport(0, spot, face);
+                return;
+            }
         }
     }
 
