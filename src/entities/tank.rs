@@ -289,10 +289,40 @@ impl Tank {
         true
     }
 
-    fn snap_to_grid(&mut self, tile_size: f32) {
-        let tx = (self.pos.x / tile_size).round();
-        let ty = (self.pos.y / tile_size).round();
-        self.pos = vec2(tx * tile_size, ty * tile_size);
+    /// Ближайшая к танку *свободная* точка сетки (из четырёх соседних:
+    /// округление вниз/вверх по каждой оси), или None, если все заняты.
+    /// Простое округление могло поставить танк внутрь стены: враг упирается
+    /// в половинку кирпича на линии x.5 и при повороте округлялся «вперёд» —
+    /// в кирпич, после чего не мог сдвинуться ни в одну сторону.
+    fn nearest_clear_grid(&self, map: &GameMap, others: &[Tank], tile_size: f32) -> Option<Vec2> {
+        self.nearest_clear_grid_within(map, others, tile_size, 0)
+    }
+
+    /// То же, но ищет и дальше — на `reach` тайлов вокруг (чтобы вытащить
+    /// танк, который уже стоит в стене точно на точке сетки).
+    fn nearest_clear_grid_within(&self, map: &GameMap, others: &[Tank], tile_size: f32, reach: i32) -> Option<Vec2> {
+        let g = self.pos / tile_size;
+        let (x0, x1) = (g.x.floor() as i32 - reach, g.x.ceil() as i32 + reach);
+        let (y0, y1) = (g.y.floor() as i32 - reach, g.y.ceil() as i32 + reach);
+        let mut cands = Vec::new();
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                let p = vec2(x as f32, y as f32) * tile_size;
+                if !cands.contains(&p) {
+                    cands.push(p);
+                }
+            }
+        }
+        cands.sort_by(|a, b| (*a - self.pos).length().total_cmp(&(*b - self.pos).length()));
+        cands.into_iter().find(|p| self.is_clear_at_px(*p, map, others, tile_size))
+    }
+
+    /// Выровнять по сетке — на ближайшую свободную точку; если свободной
+    /// нет, остаться на месте.
+    fn snap_to_grid(&mut self, map: &GameMap, others: &[Tank], tile_size: f32) {
+        if let Some(p) = self.nearest_clear_grid(map, others, tile_size) {
+            self.pos = p;
+        }
     }
 
     pub fn update(
@@ -365,6 +395,14 @@ impl Tank {
 
         self.prev_pos = self.pos;
         let goal = self.ai_goal;
+
+        // Подстраховка: если враг всё-таки оказался внутри стены — выйти
+        // на ближайшую свободную точку сетки, иначе он застрянет навсегда.
+        if map.rect_blocked(self.pos, vec2(self.size, self.size), tile_size, false) {
+            if let Some(p) = self.nearest_clear_grid_within(map, others, tile_size, 1) {
+                self.pos = p;
+            }
+        }
 
         self.ai_dir_timer -= dt;
 
@@ -482,7 +520,7 @@ impl Tank {
             let on_grid = (self.pos.x / tile_size).fract().abs() < 0.001
                 && (self.pos.y / tile_size).fract().abs() < 0.001;
             if !on_grid {
-                self.snap_to_grid(tile_size);
+                self.snap_to_grid(map, others, tile_size);
             }
             self.direction = new_dir;
         }
@@ -533,8 +571,11 @@ impl Tank {
                 // x = 511.99 вместо 512 — вверх не ехал, мешал кирпич слева).
                 self.pos = target;
             }
-        } else {
+        } else if self.is_clear_at_px(target, map, others, tile_size) {
             self.pos = target;
+        } else if let Some(p) = self.nearest_clear_grid(map, others, tile_size) {
+            // Без плавного выравнивания (враги, режим Jump) — не прыгать в стену.
+            self.pos = p;
         }
     }
 
