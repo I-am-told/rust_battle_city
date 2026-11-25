@@ -526,6 +526,12 @@ impl Tank {
             if dist > 0.01 {
                 self.slide_target = Some(target);
                 self.slide_speed = (dist / self.turn_slide_time.max(0.001)).max(self.speed);
+            } else if self.is_clear_at_px(target, map, others, tile_size) {
+                // Почти на сетке — выровнять сразу. Иначе танк, остановившийся
+                // у стены в сотых долях пикселя от сетки, «задевает» соседний
+                // тайл и не может поехать в новую сторону (баг из дампа:
+                // x = 511.99 вместо 512 — вверх не ехал, мешал кирпич слева).
+                self.pos = target;
             }
         } else {
             self.pos = target;
