@@ -200,6 +200,8 @@ impl Game {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let path = dir.join(format!("debug_{secs}.txt"));
+        // Полный путь — чтобы было понятно, в какой папке искать файл.
+        let path = std::path::absolute(&path).unwrap_or(path);
         let text = match std::fs::write(&path, self.debug_dump()) {
             Ok(()) => format!("DEBUG SAVED: {}", path.display()),
             Err(e) => format!("DEBUG NOT SAVED: {e}"),

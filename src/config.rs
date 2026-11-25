@@ -305,16 +305,20 @@ pub fn save_keys_file(path: &Path, keys: &KeysFile) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
-/// Где искать конфиг: текущая папка, затем папка с бинарником.
+/// Где искать конфиг: сначала папка с бинарником (установленная игра,
+/// см. install.sh, — всегда со своими настройками, откуда бы её ни
+/// запустили), затем текущая папка (cargo run: рядом с бинарником в
+/// target/ конфига нет, берётся из репозитория).
 fn config_candidates() -> Vec<PathBuf> {
-    let mut out = vec![PathBuf::from(CONFIG_NAME)];
+    let mut out = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let p = dir.join(CONFIG_NAME);
-            if !out.contains(&p) {
-                out.push(p);
-            }
+            out.push(dir.join(CONFIG_NAME));
         }
+    }
+    let cwd = PathBuf::from(CONFIG_NAME);
+    if !out.contains(&cwd) {
+        out.push(cwd);
     }
     out
 }
