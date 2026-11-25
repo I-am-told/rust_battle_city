@@ -79,11 +79,14 @@ impl Game {
     pub(crate) fn trace_player(&mut self, i: usize, desired: Option<Direction>, before: Vec2) {
         let ts = self.tile_size;
         let p = &self.players[i];
-        let held: String = Direction::all()
+        let mut held: String = Direction::all()
             .iter()
             .filter(|d| any_down(p.keys.keys_for(**d)))
             .map(|d| format!("{d:?} "))
             .collect();
+        if any_down(&p.keys.fire) {
+            held.push_str("Fire");
+        }
         let t = &p.tank;
         let line = format!(
             "f{} P{} keys=[{}] desired={:?} ({:.3},{:.3})->({:.3},{:.3}) dir={:?} slide={}",
@@ -121,6 +124,27 @@ impl Game {
         let _ = writeln!(s, "\n[players]");
         for (i, p) in self.players.iter().enumerate() {
             let _ = writeln!(s, "P{} {} invuln={:.2} star={}", i + 1, tank_line(&p.tank, ts), p.invuln_timer, p.star.is_some());
+        }
+        // Клавиши: что назначено и что зажато прямо сейчас (для «не стреляет»).
+        let dir = crate::config::config_dir();
+        let dir = std::fs::canonicalize(if dir.as_os_str().is_empty() { std::path::Path::new(".") } else { &dir })
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| dir.display().to_string());
+        let _ = writeln!(s, "\n[keys] config dir: {dir}");
+        let _ = writeln!(s, "exe: {}", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default());
+        for (i, p) in self.players.iter().enumerate() {
+            let k = &p.keys;
+            let held: Vec<String> = [&k.up, &k.down, &k.left, &k.right, &k.fire]
+                .iter()
+                .flat_map(|v| v.iter())
+                .filter(|c| is_key_down(**c))
+                .map(|c| format!("{c:?}"))
+                .collect();
+            let _ = writeln!(
+                s,
+                "P{} up={:?} down={:?} left={:?} right={:?} fire={:?} held_now={:?}",
+                i + 1, k.up, k.down, k.left, k.right, k.fire, held
+            );
         }
         let _ = writeln!(s, "\n[enemies]");
         for e in &self.enemies {

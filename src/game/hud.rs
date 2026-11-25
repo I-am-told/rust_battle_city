@@ -89,22 +89,46 @@ pub struct PanelInfo<'a> {
     pub mama_timer: f32,
 }
 
+/// Сетка значков запаса врагов: (шаг клетки, столбцов, отступ слева от
+/// края панели). До 2×N, где все помещаются по тайлу, — как в оригинале;
+/// иначе клетка уменьшается (а столбцов больше, до ширины 3 тайла),
+/// пока все `n` не влезут в высоту `height`.
+fn reserve_grid(n: u32, ts: f32, height: f32) -> (f32, u32, f32) {
+    let rows_full = (height / ts).floor() as u32;
+    if n <= 2 * rows_full {
+        return (ts, 2, ts);
+    }
+    let width = ts * 3.0;
+    let mut cell = ts;
+    while cell > ts * 0.15 {
+        let cols = (width / cell).floor() as u32;
+        let rows = (height / cell).floor() as u32;
+        if cols * rows >= n {
+            // Столбцы — по центру трёх тайлов панели.
+            let left = ts * 0.5 + (width - cols as f32 * cell) / 2.0 + cell * 0.1;
+            return (cell, cols, left);
+        }
+        cell *= 0.97;
+    }
+    let cols = (width / cell).floor().max(1.0) as u32;
+    (cell, cols, ts * 0.5)
+}
+
 /// Боковая панель справа от поля. Рисовать в камере `game_camera`.
 pub fn draw_panel(tile_size: f32, grid_w: i32, grid_h: i32, info: &PanelInfo) {
     let ts = tile_size;
     let x0 = grid_w as f32 * ts; // левый край панели
     let gh = grid_h as f32;
 
-    // Значки врагов, которые ещё не вышли: 2 столбца сверху вниз.
+    // Значки врагов, которые ещё не вышли, сверху вниз. Обычно — 2 столбца
+    // по тайлу; если врагов больше, чем помещается (на уровне их много),
+    // значки уменьшаются и столбцов становится больше, чтобы видно было всех.
+    let (cell, cols, left) = reserve_grid(info.enemies_left, ts, gh * ts * 0.55 - ts * 0.5);
     let icon = ts * 0.8;
     for i in 0..info.enemies_left {
-        let col = (i % 2) as f32;
-        let row = (i / 2) as f32;
-        let y = ts * 0.5 + row * ts;
-        if y + icon > gh * ts * 0.55 {
-            break; // не залезать на блок жизней (больше ~26 врагов)
-        }
-        draw_tank_icon(x0 + ts * 1.0 + col * ts, y, icon, INK);
+        let col = (i % cols) as f32;
+        let row = (i / cols) as f32;
+        draw_tank_icon(x0 + left + col * cell, ts * 0.5 + row * cell, cell * 0.8, INK);
     }
 
     // Жизни (общий запас): значки игроков и число.
