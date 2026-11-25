@@ -45,14 +45,14 @@ pub struct PlayerKeys {
 }
 
 impl PlayerKeys {
-    /// Раскладка игрока 1 по умолчанию: WASD + левый Ctrl.
+    /// Раскладка игрока 1 по умолчанию: WASD + левый или правый Ctrl.
     pub fn player1_default() -> Self {
         Self {
             up: Some(KeyList::many(&["W"])),
             down: Some(KeyList::many(&["S"])),
             left: Some(KeyList::many(&["A"])),
             right: Some(KeyList::many(&["D"])),
-            fire: Some(KeyList::many(&["LCtrl"])),
+            fire: Some(KeyList::many(&["LCtrl", "RCtrl"])),
         }
     }
 
